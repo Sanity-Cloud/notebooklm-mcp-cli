@@ -190,19 +190,20 @@ def studio_create(
     _now = _time.monotonic()
     _current_mtime = _get_auth_file_mtime()
     if _now >= _auth_guard_expires or _current_mtime != _auth_guard_mtime:
-        from ...services.auth import check_auth
+        from ...services.auth import get_auth_health_checker
 
-        auth = check_auth(live=True)
+        auth = get_auth_health_checker().check()
         if not auth.valid:
             _auth_guard_expires = 0.0
             _auth_guard_mtime = 0.0
             return error_result(
                 f"Cannot create {artifact_type}: NotebookLM auth is not valid "
-                f"(reason: {auth.reason}). Run `nlm login` in a terminal to "
+                f"(status: {auth.status}). Run `nlm login` in a terminal to "
                 "re-authenticate, then retry. `refresh_auth()` will NOT help if the "
                 "tokens are expired — it only reloads them from disk.",
                 hint="nlm login",
-                reason=auth.reason,
+                reason=auth.status,
+                profile=auth.profile,
             )
         _auth_guard_expires = _now + _AUTH_GUARD_TTL
         _auth_guard_mtime = _current_mtime

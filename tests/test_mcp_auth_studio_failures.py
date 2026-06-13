@@ -17,6 +17,7 @@ import pytest
 auth_tools = importlib.import_module("notebooklm_tools.mcp.tools.auth")
 studio_tools = importlib.import_module("notebooklm_tools.mcp.tools.studio")
 core_auth = importlib.import_module("notebooklm_tools.core.auth")
+services_auth = importlib.import_module("notebooklm_tools.services.auth")
 
 
 # --------------------------------------------------------------------------- #
@@ -25,6 +26,30 @@ core_auth = importlib.import_module("notebooklm_tools.core.auth")
 def _auth_result(valid, reason=None):
     """Build a real AuthCheckResult so we exercise the production type."""
     return core_auth.AuthCheckResult(valid=valid, reason=reason, live=True, profile="default")
+
+
+def _health_report(valid, status=None):
+    """Build a real AuthHealthReport for studio_create's shared checker."""
+    return services_auth.AuthHealthReport(
+        valid=valid,
+        status=status or ("configured" if valid else "stale"),
+        probes=[],
+        profile="default",
+        checked_at=0.0,
+    )
+
+
+def _patch_auth_health(monkeypatch, valid, status=None, counter=None):
+    """Patch the shared auth-health singleton used by studio_create."""
+
+    class _Checker:
+        def check(self):
+            if counter is not None:
+                counter["n"] += 1
+            return _health_report(valid, status)
+
+    monkeypatch.setattr(services_auth, "get_auth_health_checker", lambda: _Checker(), raising=True)
+
 
 
 class _FakeClient:
@@ -119,9 +144,7 @@ def test_studio_create_fails_loudly_on_stale_auth(monkeypatch):
     — not status:"success" with an artifact_id that immediately fails.
     """
     studio_tools._auth_guard_expires = 0.0  # force guard expired so auth is re-checked
-    monkeypatch.setattr(
-        core_auth, "check_auth", lambda **kw: _auth_result(False, "expired"), raising=True
-    )
+    _patch_auth_health(monkeypatch, False, "expired")
 
     # If the code wrongly proceeds, make the client call explode so the test can't pass by luck.
     def _boom():
@@ -147,7 +170,7 @@ def test_studio_create_fails_loudly_on_stale_auth(monkeypatch):
 def test_studio_create_proceeds_when_auth_valid(monkeypatch):
     """With valid auth, studio_create() must still create the artifact normally."""
     studio_tools._auth_guard_expires = 0.0  # force guard expired so auth is re-checked
-    monkeypatch.setattr(core_auth, "check_auth", lambda **kw: _auth_result(True), raising=True)
+    _patch_auth_health(monkeypatch, True)
     monkeypatch.setattr(studio_tools, "get_client", lambda: _FakeClient(), raising=True)
     monkeypatch.setattr(
         studio_tools.studio_service,
@@ -254,9 +277,7 @@ def test_studio_create_e2e_per_auth_state(monkeypatch, auth_state, valid, reason
     status:"error" (never a fake success).
     """
     studio_tools._auth_guard_expires = 0.0  # force guard expired so auth is re-checked
-    monkeypatch.setattr(
-        core_auth, "check_auth", lambda **kw: _auth_result(valid, reason), raising=True
-    )
+    _patch_auth_health(monkeypatch, valid, reason)
     monkeypatch.setattr(studio_tools, "get_client", lambda: _FakeClient(), raising=True)
     monkeypatch.setattr(
         studio_tools.studio_service,
@@ -300,9 +321,7 @@ def test_studio_create_resets_auth_guard_on_invalid_auth(monkeypatch):
     the TTL has already expired and we just detected the invalid auth: we
     should not let a future-valid guard leak forward to the next call.
     """
-    monkeypatch.setattr(
-        core_auth, "check_auth", lambda **kw: _auth_result(False, "expired"), raising=True
-    )
+    _patch_auth_health(monkeypatch, False, "expired")
     monkeypatch.setattr(studio_tools, "get_client", lambda: _FakeClient(), raising=True)
 
     # Pre-seed the guard with a future timestamp, simulating "auth was valid
@@ -338,7 +357,7 @@ def test_studio_create_invalidates_auth_guard_when_auth_file_changes(monkeypatch
 
     # First call: mtime=N. Guard populated with mtime=N.
     monkeypatch.setattr(studio_tools, "_get_auth_file_mtime", lambda: 1000.0, raising=True)
-    monkeypatch.setattr(core_auth, "check_auth", _counting_check_auth, raising=True)
+    _patch_auth_health(monkeypatch, True, counter=check_call_count)
     monkeypatch.setattr(studio_tools, "get_client", lambda: _FakeClient(), raising=True)
     monkeypatch.setattr(
         studio_tools.studio_service,
@@ -382,7 +401,7 @@ def test_studio_create_invalidates_auth_guard_when_auth_file_appears(monkeypatch
 
     # First call: file does not exist (mtime=0.0). Guard populated with mtime=0.0.
     monkeypatch.setattr(studio_tools, "_get_auth_file_mtime", lambda: 0.0, raising=True)
-    monkeypatch.setattr(core_auth, "check_auth", _counting_check_auth, raising=True)
+    _patch_auth_health(monkeypatch, True, counter=check_call_count)
     monkeypatch.setattr(studio_tools, "get_client", lambda: _FakeClient(), raising=True)
     monkeypatch.setattr(
         studio_tools.studio_service,
