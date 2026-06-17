@@ -77,6 +77,7 @@ async def health_check(request: Request) -> JSONResponse:
 def _register_tools() -> None:
     """Import and register all tools from the modular tools package."""
     # Import all tool modules to populate the registry
+    from .plugins import load_plugins
     from .tools import (  # noqa: F401
         auth,
         batch,
@@ -97,8 +98,10 @@ def _register_tools() -> None:
     )
     from .tools._utils import register_all_tools
 
-    # Register collected tools with mcp
+    # Register collected built-in tools with mcp first. Optional plugins may then
+    # add their own tools/routes without patching core tool modules.
     register_all_tools(mcp)
+    load_plugins(mcp)
 
     # Optionally hide tool groups/tools via environment variables (opt-in).
     from . import tool_groups
@@ -133,6 +136,8 @@ Environment Variables:
   NOTEBOOKLM_MCP_PATH          MCP endpoint path (default: /mcp)
   NOTEBOOKLM_MCP_STATELESS     Stateless HTTP sessions (default: true, set false to disable)
   NOTEBOOKLM_MCP_DEBUG         Debug logging (default: false)
+  NOTEBOOKLM_MCP_PLUGINS       Comma-separated optional plugin specs to load
+  NOTEBOOKLM_MCP_PLUGIN_STRICT Fail startup on plugin load errors (default: true)
   NOTEBOOKLM_HL                Interface language and default artifact language (default: en)
   NOTEBOOKLM_QUERY_TIMEOUT     Query timeout in seconds (default: 120.0)
 
