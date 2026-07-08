@@ -438,13 +438,13 @@ def _is_snap_browser(browser_path: str) -> bool:
         return False
 
     # Direct snap path or snap binary wrapper
-    if "/snap/" in browser_path:
+    if "/snap/" in browser_path.replace("\\", "/"):
         return True
 
     # Check if it's a symlink pointing to a snap path
     try:
-        resolved = Path(browser_path).resolve()
-        if "/snap/" in str(resolved):
+        resolved = Path(browser_path).resolve().as_posix()
+        if "/snap/" in resolved:
             return True
     except (OSError, RuntimeError):
         pass

@@ -4,7 +4,7 @@ The goal is a single source of truth:
 
     from notebooklm_tools.core.auth import check_auth, AuthCheckResult
 
-    result = check_auth(live=True)   # authoritative
+    result = check_auth(profile="default", live=True)   # authoritative
     result = check_auth(live=False)  # fast heuristic
 
 Both `nlm login --check` and the MCP `server_info` tool should be thin
@@ -76,7 +76,7 @@ class TestCheckAuthAPI:
             )
             client.get.return_value = fake_response
 
-            result = check_auth(live=True, timeout=5.0)
+            result = check_auth(profile="default", live=True, timeout=5.0)
 
             assert result.valid is True
             assert result.live is True
@@ -117,7 +117,7 @@ class TestCheckAuthAPI:
             resp = httpx.Response(200, request=req, text="login page here")
             client.get.return_value = resp
 
-            result = check_auth(live=True)
+            result = check_auth(profile="default", live=True)
 
             assert result.valid is False
             assert result.reason == "expired"
@@ -147,7 +147,7 @@ class TestCheckAuthAPI:
             req = httpx.Request("GET", "https://accounts.google.com/ServiceLogin")
             client.get.return_value = httpx.Response(200, request=req, text="login page")
 
-            result = check_auth(live=True)
+            result = check_auth(profile="default", live=True)
 
         assert result.valid is True
         assert result.reason is None
@@ -171,7 +171,7 @@ class TestCheckAuthAPI:
             req = httpx.Request("GET", "https://notebooklm.google.com/")
             client.get.return_value = httpx.Response(500, request=req, text="oops")
 
-            result = check_auth(live=True)
+            result = check_auth(profile="default", live=True)
 
         assert result.valid is False
         assert result.reason == "http_500"
@@ -195,7 +195,7 @@ class TestCheckAuthAPI:
             client = MockClient.return_value.__enter__.return_value
             client.get.side_effect = httpx.ReadTimeout("read timed out")
 
-            result = check_auth(live=True, timeout=5.0)
+            result = check_auth(profile="default", live=True, timeout=5.0)
 
         assert result.valid is False
         assert result.reason == "network_error: ReadTimeout"

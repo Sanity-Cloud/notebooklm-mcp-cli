@@ -325,14 +325,14 @@ class TestCDPStartupHandling:
         chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
         def fake_exists(self):
-            return str(self) == chrome_path
+            return Path(self).as_posix() == Path(chrome_path).as_posix()
 
         with (
             patch("notebooklm_tools.utils.cdp.platform.system", return_value="Darwin"),
             patch.object(Path, "exists", fake_exists),
         ):
             result = get_chrome_path()
-        assert result == chrome_path
+        assert result is not None and Path(result).as_posix() == Path(chrome_path).as_posix()
 
     # ------------------------------------------------------------------
     # get_chrome_path — Linux
