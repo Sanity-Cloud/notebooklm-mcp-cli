@@ -565,8 +565,15 @@ Check studio content generation status for notebook [notebook_id].
 ```
 
 **Expected:**
-- List of artifacts with status (in_progress/completed) and URLs.
-- **Verify:** Artifact from Test 5.1b shows `custom_instructions: "Explain this to a 5 year old"`.
+- Default MCP response contains at most 20 artifacts and only lean status fields.
+- `pagination` contains `returned`, `offset`, `limit`, and `has_more`.
+- Polling with `artifact_id` returns only the selected artifact.
+- Calling with `include_details=True` exposes rich fields and the artifact from
+  Test 5.1b shows `custom_instructions: "Explain this to a 5 year old"`.
+- `nlm studio status [notebook_id] --json` remains a plain list containing both
+  `id` and `artifact_id`.
+- `nlm studio status [notebook_id] --json --mcp-compatible` returns the MCP envelope.
+- `nlm video list [notebook_id] --json` returns only video artifacts.
 
 ---
 

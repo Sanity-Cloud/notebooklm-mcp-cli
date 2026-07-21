@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.9] - 2026-07-17
+
+### Added
+- **Bounded Studio status polling (#263)** — MCP `studio_status` now returns lean fields and at most 20 artifacts by default, supports artifact-specific lookup and pagination, and exposes rich prompts/content only with `include_details=True`.
+- **CLI status compatibility bridge (#263)** — Legacy Studio JSON remains a plain list with `id`, while also exposing `artifact_id`; `--mcp-compatible` returns the MCP envelope and `nlm video list` provides discoverable video-only status.
+
+### Fixed
+- **Short video language steering (#263)** — Non-English Short requests now add an explicit language requirement for narration, subtitles, and on-screen text without changing the reverse-engineered RPC payload.
+- **Studio rate-limit guidance (#263)** — MCP creation errors preserve the service retry hint, and documentation distinguishes brief automatic retries from minute-scale Studio quota waits.
+
+### Documentation
+- Updated CLI, MCP, API, troubleshooting, packaged skill, command reference, prompting guide, and test-plan documentation for the new Studio status, Short-language, and retry behavior.
+
 ## [0.8.8] - 2026-07-16
 
 ### Added

@@ -1,6 +1,6 @@
 ---
 name: nlm-skill
-version: "0.8.8"
+version: "0.8.9"
 description: "Expert guide for the NotebookLM CLI (`nlm`) and MCP server - interfaces for Google NotebookLM. Use this skill when users want to interact with NotebookLM programmatically, including: creating/managing notebooks, adding sources (URLs, YouTube, text, Google Drive), generating content (podcasts, reports, quizzes, flashcards, mind maps, slides, infographics, videos, data tables), conducting research, chatting with sources, or automating NotebookLM workflows. Triggers on mentions of \"nlm\", \"notebooklm\", \"notebook lm\", \"podcast generation\", \"audio overview\", \"refactor document\", \"critique draft\", or any NotebookLM-related automation task."
 ---
 
@@ -429,7 +429,7 @@ nlm data-table create <id> "Extract all dates and events" --confirm
 | Custom report | report: `Create Your Own` + `custom_prompt` |
 | Structured extraction | data_table: explicit column schema in `description` |
 
-**After generation:** Poll `studio_status`. Revise slides with `studio_revise`. Reuse successful prompts from `custom_instructions` in status output.
+**After generation:** Poll `studio_status` by `artifact_id`. Revise slides with `studio_revise`. Request `include_details=True` only when reusing a successful prompt from `custom_instructions`.
 
 ### 6. Studio (Artifact Management)
 
@@ -437,7 +437,7 @@ nlm data-table create <id> "Extract all dates and events" --confirm
 
 Use `studio_status` to check progress, rename with `action="rename"`, or inspect
 supported types with `action="list_types"`. Failed artifacts include
-`error_reason`. Each artifact also includes `source_ids`; an empty list means
+`error_reason`. Detailed mode also includes `source_ids`; an empty list means
 the upstream payload did not expose provenance, not necessarily that no
 sources were used. Use `download_artifact` with `artifact_type` and
 `output_path`, `export_artifact` with `export_type` (`docs`/`sheets`), and
@@ -450,6 +450,9 @@ nlm studio status <nb-id>                          # List all artifacts
 nlm studio status <nb-id> --full                   # Show full details (including custom prompts)
 nlm studio status <nb-id> --json                   # JSON output
 nlm studio status <nb-id> --json --full            # Includes artifact source_ids
+nlm studio status <nb-id> --artifact-id <id>       # Poll one artifact
+nlm studio status <nb-id> --json --mcp-compatible  # MCP-shaped paginated output
+nlm video list <nb-id> --json                      # List videos only
 
 # Download artifacts
 nlm download audio <nb-id> --output podcast.mp3
@@ -469,7 +472,7 @@ nlm studio delete <nb-id> <artifact-id> --confirm
 
 **Status values**: `completed` (✓), `in_progress` (●), `failed` (✗)
 
-**Prompt Extraction**: The `studio_status` tool returns a `custom_instructions` field for each artifact. This contains the original focus prompt or custom instructions used to generate that artifact (e.g., the prompt for a "Create Your Own" report, or the focus topic for an Audio Overview). This is useful for retrieving the exact prompt that generated a successful artifact.
+**Prompt Extraction**: MCP `studio_status` is lean and returns at most 20 artifacts by default. Pass `include_details=True` to retrieve `custom_instructions`, source IDs, report content, and media details. Pass `artifact_id` when polling a newly created artifact. CLI `--full` preserves the detailed output.
 
 ### Renaming Resources
 
@@ -863,7 +866,7 @@ nlm pipeline run ingest-and-podcast --notebook <id> --input-url "https://example
 | "authentication may have expired" | Session timeout | `nlm login` |
 | "Notebook not found" | Invalid ID | `nlm notebook list` |
 | "Source not found" | Invalid ID | `nlm source list <nb-id>` |
-| "Rate limit exceeded" | Too many calls | Wait 30s, retry |
+| "Rate limit exceeded" | Too many calls | Studio creation: wait 1-2 minutes; avoid parallel video batches |
 | "Research already in progress" | Pending research | Use `--force` or import first |
 | "Import timed out" | Too many sources | Use `--timeout 600` for larger notebooks |
 | "Google API error code 3" | Transient deep research error | Retry in a few minutes, or use `--mode fast` |
@@ -876,7 +879,7 @@ nlm pipeline run ingest-and-podcast --notebook <id> --input-url "https://example
 
 Wait between operations to avoid rate limits:
 - Source operations: 2 seconds
-- Content generation: 5 seconds
+- Content generation: run sequentially; after a rate limit, wait 1-2 minutes
 - Research operations: 2 seconds
 - Query operations: 2 seconds
 

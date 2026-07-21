@@ -93,8 +93,9 @@ nlm audio create <notebook> --language es-419 --confirm  # Latin-American Spanis
 nlm video create <notebook> --confirm
 nlm video create <notebook> --format explainer --style classic --confirm
 nlm video create <notebook> --style custom --style-prompt "A children's storybook illustration" --confirm
-# Formats: explainer, brief, cinematic, short (vertical, ~60s, English-only)
+# Formats: explainer, brief, cinematic, short (vertical, ~60s)
 # Styles: auto_select, custom, classic, whiteboard, kawaii, anime, watercolor, retro_print, heritage, paper_craft (not for cinematic/short)
+# Short language selection is best-effort; --language adds an explicit requirement to the focus prompt.
 
 # Reports
 nlm report create <notebook> --format "Briefing Doc" --confirm
@@ -157,8 +158,16 @@ nlm research import <notebook> <task-id> --cited-only      # Import cited deep r
 
 ```bash
 nlm studio status <notebook>           # Check artifact generation status
+nlm studio status <notebook> --artifact-id <id>  # Poll one artifact
+nlm studio status <notebook> --json --mcp-compatible  # MCP-shaped paginated JSON
+nlm video list <notebook>               # List video artifacts only
 nlm studio delete <notebook> <artifact-id> --confirm  # Delete artifact
 ```
+
+The existing `--json` output remains a plain list for script compatibility and
+contains both `id` and `artifact_id`. `--mcp-compatible` returns the MCP envelope,
+uses lean fields by default, and limits the response to 20 artifacts. Add
+`--full`, `--limit`, or `--offset` when detailed or later-page data is needed.
 
 ### Sharing
 

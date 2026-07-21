@@ -545,7 +545,11 @@ nlm video create <notebook-id> [OPTIONS]
 | `--style-prompt` | Custom visual style text (requires `--style custom`, or implies it when `--style` omitted) | |
 | `--focus` | Focus text/topic | |
 
-`short` produces a ~60s vertical video with no visual style picker; English-only for now.
+`short` produces a ~60s vertical video with no visual style picker. Non-English
+output is best-effort: `--language` adds an explicit language requirement to the
+focus prompt because the captured Short RPC uses a null language slot.
+
+List generated videos with `nlm video list <notebook-id>`.
 
 ### nlm data-table create
 
@@ -573,10 +577,18 @@ nlm studio status <notebook-id> [OPTIONS]
 |--------|-------------|
 | `--json` | Output as JSON |
 | `--full` | Show all details |
+| `--artifact-id` | Return one artifact by ID |
+| `--limit` | Maximum artifacts to return (1-100) |
+| `--offset` | Skip artifacts for pagination |
+| `--mcp-compatible` | Return the lean, paginated MCP envelope as JSON |
 | `--profile` | Use specific profile |
 
 `--json --full` includes `source_ids`, allowing each artifact to be traced to
 the source set used to generate it.
+
+The legacy `--json` shape remains a plain list and now contains both `id` and
+`artifact_id`. MCP-compatible output defaults to 20 lean artifacts; combine it
+with `--full` only when prompts or other rich fields are needed.
 
 ### nlm studio delete
 

@@ -495,6 +495,8 @@ Simply chat with your AI tool (Claude Code, Cursor, Gemini CLI) using natural la
 - "Show me all the sources in this notebook with their freshness status"
 - "Delete this source from the notebook"
 - "Check the status of my audio overview generation"
+- "Check this specific artifact without listing every Studio item"
+- "List only the generated videos in this notebook"
 
 ### Sharing & Collaboration
 
