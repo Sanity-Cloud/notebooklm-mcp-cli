@@ -545,7 +545,11 @@ nlm video create <notebook-id> [OPTIONS]
 | `--style-prompt` | Custom visual style text (requires `--style custom`, or implies it when `--style` omitted) | |
 | `--focus` | Focus text/topic | |
 
-`short` produces a ~60s vertical video with no visual style picker; English-only for now.
+`short` produces a ~60s vertical video with no visual style picker. Non-English
+output is best-effort: `--language` adds an explicit language requirement to the
+focus prompt because the captured Short RPC uses a null language slot.
+
+List generated videos with `nlm video list <notebook-id>`.
 
 ### nlm data-table create
 
@@ -573,10 +577,18 @@ nlm studio status <notebook-id> [OPTIONS]
 |--------|-------------|
 | `--json` | Output as JSON |
 | `--full` | Show all details |
+| `--artifact-id` | Return one artifact by ID |
+| `--limit` | Maximum artifacts to return (1-100) |
+| `--offset` | Skip artifacts for pagination |
+| `--mcp-compatible` | Return the lean, paginated MCP envelope as JSON |
 | `--profile` | Use specific profile |
 
 `--json --full` includes `source_ids`, allowing each artifact to be traced to
 the source set used to generate it.
+
+The legacy `--json` shape remains a plain list and now contains both `id` and
+`artifact_id`. MCP-compatible output defaults to 20 lean artifacts; combine it
+with `--full` only when prompts or other rich fields are needed.
 
 ### nlm studio delete
 
@@ -618,6 +630,29 @@ nlm download video <nb-id> --output video.mp4
 nlm download report <nb-id> --output report.md
 nlm download quiz <nb-id> --output quiz.html --format html
 nlm download flashcards <nb-id> --output cards.json --format json
+```
+
+### nlm download all
+
+Download every completed artifact of a notebook — or every notebook — into
+per-notebook directories named after each notebook's title.
+
+```bash
+nlm download all <notebook-id> [OPTIONS]
+nlm download all --all-notebooks [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--output-dir`, `-d` | Base directory; a subdirectory per notebook is created inside |
+| `--types`, `-t` | Comma-separated artifact types to include (default: all) |
+| `--all-notebooks`, `-a` | Sweep every notebook in the account |
+| `--skip-existing` | Skip artifacts whose file already exists (incremental re-runs) |
+
+**Examples:**
+```bash
+nlm download all <nb-id> --output-dir ./exports
+nlm download all --all-notebooks --output-dir ./exports --skip-existing
 ```
 
 ---
@@ -791,6 +826,66 @@ nlm chat configure <notebook-id> [OPTIONS]
 | `--prompt` | Custom system prompt (required when goal is `custom`) |
 | `--response-length` | `default`, `longer`, `shorter` |
 | `--profile` | Use specific profile |
+
+### nlm chats list
+
+List chat sessions for a notebook (alias: `nlm chat list`).
+
+```bash
+nlm chats list <notebook-id> [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--limit` | `-l` | Max chat sessions to display (default: 20) |
+| `--json` | | Output raw JSON |
+| `--profile` | `-p` | Use specific profile |
+
+### nlm chats get
+
+Retrieve the full Q&A transcript for a chat session. Transcripts are fetched
+from the NotebookLM server, so past chats are visible even from a fresh CLI
+invocation — not just chats made earlier in the same process.
+
+```bash
+nlm chats get <notebook-id> [conversation-id] [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| (positional) | | Conversation ID; defaults to the notebook's latest session |
+| `--json` | | Output raw JSON |
+| `--profile` | `-p` | Use specific profile |
+
+### nlm chats export
+
+Export a chat transcript to Markdown or JSON.
+
+```bash
+nlm chats export <notebook-id> [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--conversation-id` | `-c` | Conversation ID; defaults to the latest session |
+| `--format` | `-f` | `md` (default) or `json` |
+| `--output` | `-o` | File path to save the export (prints to stdout if omitted) |
+| `--profile` | `-p` | Use specific profile |
+
+### nlm chats to-note
+
+Save a chat turn or the full chat session as a Note in the notebook.
+
+```bash
+nlm chats to-note <notebook-id> <conversation-id> [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--turn` | `-t` | 1-indexed turn to save (default: entire chat) |
+| `--title` | | Note title |
+| `--json` | | Output raw JSON |
+| `--profile` | `-p` | Use specific profile |
 
 ---
 

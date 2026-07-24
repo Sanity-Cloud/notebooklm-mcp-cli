@@ -5,6 +5,119 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2+sanitycloud.1] - 2026-07-23
+
+### Integrated
+- Merged the complete upstream `v0.9.2` release (`b2ab42587940f100658f55a97b33f8d9873d2f55`), including chat-session management, bulk artifact downloads, MCP tool-group gating, Windows `uvx` discovery, current auth migration behavior, and CVE lockfile updates.
+
+### Preserved
+- Retained the opt-in SanityCloud MCP plugin loader, entry-point group `notebooklm_tools.mcp_plugins`, explicit module/callable loading, strict/non-strict failure handling, autoload control, plugin guide, and regression tests. Built-in tools register before plugins; tool-group filtering remains applied after registration.
+- Retained the fork's browser-path and authentication test hardening where it remains compatible with upstream 0.9.2.
+
+### Added
+- Allowed the current personal hostname `https://notebook.google.com` alongside the upstream personal and Enterprise hostnames while preserving HTTPS and exact-host validation.
+- Added a local PEP 440 build marker so runtime diagnostics identify this fork as `0.9.2+sanitycloud.1`.
+
+## [0.9.2] - 2026-07-23
+
+### Fixed
+- **Desktop extension finds uvx installed via `pip install --user` on Windows (#267)** — the `.mcpb` launcher could fail to start with `Error: Could not find 'uvx'` even when uv was installed, because `pip install --user uv` places `uvx.exe` in `%APPDATA%\Python\Python3XX\Scripts`, which Windows does not add to PATH and which was missing from the launcher's search list. The launcher now checks the per-user Scripts directory of every installed CPython version. No behavior change on macOS/Linux. Thanks to **@onexoluxion** for the fix!
+
+### Security
+- **Bumped locked dependencies with published CVEs (#268)** — `uv.lock` now pins mcp 1.28.1, starlette 1.3.1, python-multipart 0.0.32, cryptography 49.0.0, and pyjwt 2.13.0. Lockfile-only change: no source or constraint changes, and end users installing via `uv tool install` were already resolving patched versions from PyPI — this brings the committed lockfile (used by CI and contributors) up to date. Thanks to **@onexoluxion** for the precise report and verified fix command!
+
+## [0.9.1] - 2026-07-22
+
+### Added
+- **Chat session management (#256)** — list, view, export, and save past notebook chats.
+  - CLI: `nlm chats list <notebook>`, `nlm chats get <notebook> [conversation_id]`, `nlm chats export <notebook> [conversation_id] --format md|json --output file`, and `nlm chats to-note <notebook> <conversation_id> [--turn N] [--title ...]`.
+  - MCP tools: `chat_list`, `chat_get`, `chat_export`.
+  - Transcripts are fetched from NotebookLM's server (a newly-documented `khqZz` RPC, see `docs/API_REFERENCE.md`), so past chats are visible even from a fresh CLI invocation or MCP session — not just chats made earlier in the same process.
+  - Documented in `SKILL.md`, `AGENTS_SECTION.md`'s `command_reference.md`, `docs/CLI_GUIDE.md`, `docs/MCP_GUIDE.md`, `README.md`, and `AGENTS.md`.
+
+### Fixed
+- **Preserve profile email across token updates (#266)** — `AuthManager.save_profile()` now preserves the existing stored profile email from `metadata.json` when `email=None` is passed during background CSRF updates, token refreshes, and `save_tokens_to_cache()` calls.
+- **Chat session tools now respect the configured default profile** — `services/chats.py` no longer hardcodes profile `"default"`; it now falls back to `get_config().auth.default_profile` like the rest of the CLI/MCP client resolution, so `chat_list`/`chat_get`/`chat_export` and `nlm chats ...` work correctly for accounts using `nlm login switch`.
+- **`nlm chats to-note` / `save_chat_to_note` now creates the note correctly** — it was calling `notes_service.create_note()` with the wrong signature (`notebook=`/`profile=` keyword args instead of the required `(client, notebook_id, content, title)`), which raised a `TypeError` at runtime. Never shipped, caught before release via live testing.
+- **`chat_list`/`chat_get`/`chat_export` are now hideable via `NOTEBOOKLM_DISABLED_GROUPS`** — added to the `chat` tool group in `tool_groups.py`, which previously covered only `notebook_query`/`chat_configure`/`notebook_query_start`/`notebook_query_status`.
+- **Tool count corrected to 43 across all docs** — `label`, `notebook_query_start`, and `notebook_query_status` were registered MCP tools missing from `mcp/tools/__init__.py`'s `__all__` and from `docs/MCP_GUIDE.md` (which also separately lacked `source_rename` and `notebook_share_batch`). Fixed the export list and documented every tool; updated the stale "40 tools" (and one "39 tools") count in README.md, the desktop extension manifest, `SKILL.md`, and `docs/MCP_CLI_TEST_PLAN.md`. Added a regression test (`test_groups_cover_every_registered_tool`) so a new tool shipping without a `tool_groups.py` entry fails CI instead of silently drifting.
+
+## [0.9.0] - 2026-07-20
+
+### Added
+- **Bulk artifact download (#258, #264)** — New MCP tool `download_all_artifacts` and CLI command `nlm download all` download every completed Studio artifact of a notebook — or every notebook in the account with `--all-notebooks`/`all_notebooks=True` — into per-notebook directories named after each notebook's title. Supports an `--types`/`artifact_types` filter, `--skip-existing`/`skip_existing` for incremental re-runs, and safe cross-platform filenames (invalid characters replaced, Windows reserved names escaped, collisions deduped case-insensitively for both notebook directories and artifact filenames). A failure on one artifact or notebook is recorded and does not stop the rest; the CLI exits non-zero only when nothing was downloaded and failures occurred. Thanks to **@hansschenker** for the original contribution (PR #258), and to **@runthangs** for following up with fixes for directory collisions, case-insensitive overwrites, and the `--all-notebooks` exit code (PR #264)!
+
+### Documentation
+- Reconciled the MCP tool count (39 → 40) and added `download_all_artifacts`/`nlm download all` across the README, MCP Guide, CLI Guide, packaged skill, and command reference.
+
+## [0.8.9] - 2026-07-17
+
+### Added
+- **Bounded Studio status polling (#263)** — MCP `studio_status` now returns lean fields and at most 20 artifacts by default, supports artifact-specific lookup and pagination, and exposes rich prompts/content only with `include_details=True`.
+- **CLI status compatibility bridge (#263)** — Legacy Studio JSON remains a plain list with `id`, while also exposing `artifact_id`; `--mcp-compatible` returns the MCP envelope and `nlm video list` provides discoverable video-only status.
+
+### Fixed
+- **Short video language steering (#263)** — Non-English Short requests now add an explicit language requirement for narration, subtitles, and on-screen text without changing the reverse-engineered RPC payload.
+- **Studio rate-limit guidance (#263)** — MCP creation errors preserve the service retry hint, and documentation distinguishes brief automatic retries from minute-scale Studio quota waits.
+
+### Documentation
+- Updated CLI, MCP, API, troubleshooting, packaged skill, command reference, prompting guide, and test-plan documentation for the new Studio status, Short-language, and retry behavior.
+
+## [0.8.8] - 2026-07-16
+
+### Added
+- **Opt-in file upload directory allowlist (#260)** — Set `NOTEBOOKLM_ALLOWED_FILE_DIRS` to restrict local file uploads to approved directories. The setting accepts multiple directories separated by the operating system's path separator and is disabled by default, so existing installations keep their current behavior. Thanks to **@failsafesecurity** for the contribution!
+- **Opt-in download output directory (#261)** — Set `NOTEBOOKLM_DOWNLOAD_DIR` to keep downloaded artifacts inside one approved directory. The setting is disabled by default, while the existing protections against sensitive system directories remain active. Thanks again to **@failsafesecurity** for the contribution!
+
+### Fixed
+- **Rejected document uploads now fail fast (#257)** — When NotebookLM immediately rejects a non-media file, `nlm` now reports the failure on the first terminal status instead of waiting for the full processing timeout. The error includes the source ID and deletion guidance, and source listings expose the numeric processing status for diagnosis. Audio and video uploads retain their transient-processing tolerance. Thanks to **@ericvael** for the detailed reproduction data!
+- **Refreshed authentication cookies are persisted** — Rotated cookies are now saved together with refreshed CSRF and session tokens, preventing a successful refresh from leaving stale credentials on disk.
+- **Regular notes no longer appear as mind maps (#258)** — Mind-map discovery now excludes ordinary saved notes. Thanks to **@hansschenker** for the contribution!
+- **Newer Studio mind maps download correctly (#258)** — Mind maps returned through NotebookLM's shared type-4 Studio format are now classified by subtype and downloaded as their embedded JSON instead of being treated as quizzes or flashcards. Thanks again to **@hansschenker** for the contribution!
+
+### Documentation
+- Documented the opt-in upload and download directory controls and the observed type-4 mind-map format.
+
+## [0.8.7] - 2026-07-14
+
+### Added
+- **JSON output parity for scripting and agents (#256)** — Added `--json` support to source add/delete, notebook delete, and every Studio creation command. Noun-first and verb-first command styles now expose the same JSON options, with machine-readable IDs and deletion confirmations.
+- **Notebook emoji and query context in JSON (#256)** — `nlm notebook get --json` now includes the notebook emoji, and `nlm notebook query --json` includes the original question alongside the answer and citations.
+
+### Fixed
+- **Mind maps mislabeled as flashcards in Studio status** — NotebookLM now returns saved mind maps through the shared Studio type code `4` with subtype `4`. Status parsing now identifies them as `mind_map`, avoids counting their metadata as flashcards, and deduplicates entries returned by both status paths.
+- **Drive-picker PDFs mislabeled as Word documents** — When NotebookLM returns the ambiguous source type code `14`, source listing and content metadata now prefer an explicit `application/pdf` MIME type. The raw numeric code remains unchanged for compatibility.
+
+### Documentation
+- Updated the CLI and AI-facing command references for the new JSON output options and documented the live-observed Studio mind-map subtype.
+
+## [0.8.6] - 2026-07-11
+
+### Fixed
+- **`nlm doctor auth-replay` false `browser_bound_replay` verdict on merely expired cookies (#248)** — The diagnostic previously compared *stale on-disk* cookies (`httpx_saved`, `httpx_after_rotate`) against an *always-fresh* live browser session (`cdp_in_page`). Since a live session's cookies are fresh by construction, that comparison could not distinguish ordinary cookie expiry from genuine device-bound replay — both produce the exact same pass/fail pattern. The diagnostic now re-extracts cookies from the same live browser session used for the CDP probe and replays them through plain httpx (new `httpx_fresh` lane) before drawing a conclusion. If fresh cookies succeed over httpx, the verdict is now the new `stale_cookies` (run `nlm login`, no transport needed); `browser_bound_replay` is only reported when even freshly re-extracted cookies fail outside the browser. Thanks to **@leomesheti-crypto** for the detailed controlled-comparison report that caught this.
+
+### Changed
+- **`nlm doctor auth-replay` now reports four lanes** instead of three: saved-cookie httpx replay, httpx after forced cookie rotation, fresh-cookie httpx replay, and the in-page CDP fetch. `--no-cdp` skips the two browser-backed lanes together.
+- Updated `docs/AUTHENTICATION.md` to describe the corrected four-lane diagnostic and clarify when the experimental `NOTEBOOKLM_RPC_TRANSPORT=cdp` transport is actually justified.
+
+### Other
+- README: moved the "Buy Me a Coffee" call-out from a low-visibility badge in the top badge row to a prominent, centered block near the top of the page.
+
+## [0.8.5] - 2026-07-10
+
+### Added
+- **Opt-in tool gating** — You can now restrict the tools exposed to your AI agent by setting the `NOTEBOOKLM_DISABLED_GROUPS` environment variable. This saves significant context window tokens for agents that only need a subset of functionality. Huge thanks to **@KoscheiiB** for the excellent PR! (#254)
+
+### Fixed
+- **Flaky test in parallel freshness checks** — Fixed a race condition in the test suite that caused intermittent failures during the Drive source freshness fan-out. Thanks again to **@KoscheiiB** for identifying the root cause and proposing the fix! (#255)
+
+## [0.8.4] - 2026-07-09
+
+### Fixed
+
+- **Hardened CDP auth and Windows test failures (PR #253)** — Eliminated a redundant lock-reset in `cdp.py` that created a race condition where a newly opened WebSocket could be prematurely closed. Thanks to **@insane66613** for the PR!
+- **Test storage isolation** — Added `conftest.py` with autouse fixtures to isolate test execution from user storage, preventing tests from silently overwriting real user credentials in `~/.notebooklm-mcp-cli/auth.json`. (Cherry-picked from PR #252)
+
 ## [0.8.3] - 2026-07-05
 
 ### Added

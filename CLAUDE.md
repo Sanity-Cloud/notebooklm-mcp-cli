@@ -162,6 +162,9 @@ src/notebooklm_tools/
 | `notebook_delete` | Delete a notebook (REQUIRES confirmation) |
 | `source_add` | Add source (url, text, drive, file) |
 | `notebook_query` | Ask questions (AI answers!) |
+| `chat_list` | List chat sessions for a notebook |
+| `chat_get` | Get full transcript of a chat session (defaults to latest) |
+| `chat_export` | Export a chat transcript to Markdown or JSON |
 | `source_list_drive` | List sources with types, check Drive freshness |
 | `source_sync_drive` | Sync stale Drive sources (REQUIRES confirmation) |
 | `source_rename` | Rename a source in a notebook |
@@ -171,6 +174,7 @@ src/notebooklm_tools/
 | `research_import` | Import discovered sources into notebook (manual, if `auto_import` not used) |
 | `studio_create` | Generate unified content (audio, video, infographic, slides, etc.) |
 | `download_artifact` | Download any artifact (audio, video, pdf, markdown, json). Supports `wait`, `wait_timeout`, `poll_interval` params and returns `download_url` when MCP HTTP transport is active. |
+| `download_all_artifacts` | Download every completed artifact of a notebook — or every notebook with `all_notebooks=True` — into per-notebook directories (named after notebook titles). Optional `artifact_types` filter and `skip_existing` for incremental re-runs; failures on one artifact/notebook don't stop the rest. CLI: `nlm download all [--all-notebooks] [--skip-existing]` |
 | `export_artifact` | Export Data Tables to Google Sheets or Reports to Google Docs |
 | `studio_status` | Check studio artifact generation status |
 | `studio_delete` | Delete studio artifacts (REQUIRES confirmation) |

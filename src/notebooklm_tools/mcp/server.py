@@ -53,6 +53,7 @@ Consolidated tools:
 - studio_create(artifact_type=audio|video|...): Create any artifact type
 - studio_revise: Revise individual slides in an existing slide deck
 - download_artifact(artifact_type=audio|video|...): Download any artifact type
+- download_all_artifacts: Download every completed artifact of a notebook into a per-notebook folder
 - note(action=create|list|update|delete): Manage notes in notebooks
 - label(action=auto|list|reorganize|create|rename|set_emoji|move_source|delete): Manage source labels""",
 )
@@ -82,6 +83,7 @@ def _register_tools() -> None:
         auth,
         batch,
         chat,
+        chats,
         cross_notebook,
         downloads,
         exports,
@@ -102,6 +104,11 @@ def _register_tools() -> None:
     # add their own tools/routes without patching core tool modules.
     register_all_tools(mcp)
     load_plugins(mcp)
+
+    # Optionally hide tool groups/tools via environment variables (opt-in).
+    from . import tool_groups
+
+    tool_groups.apply(mcp)
 
 
 # Register tools on import
@@ -132,6 +139,7 @@ Environment Variables:
   NOTEBOOKLM_MCP_STATELESS     Stateless HTTP sessions (default: true, set false to disable)
   NOTEBOOKLM_MCP_DEBUG         Debug logging (default: false)
   NOTEBOOKLM_MCP_PLUGINS       Comma-separated optional plugin specs to load
+  NOTEBOOKLM_MCP_PLUGIN_AUTOLOAD Load all installed plugin entry points (default: false)
   NOTEBOOKLM_MCP_PLUGIN_STRICT Fail startup on plugin load errors (default: true)
   NOTEBOOKLM_HL                Interface language and default artifact language (default: en)
   NOTEBOOKLM_QUERY_TIMEOUT     Query timeout in seconds (default: 120.0)

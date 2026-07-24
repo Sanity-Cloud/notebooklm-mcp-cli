@@ -101,3 +101,10 @@ def test_find_or_create_notebooklm_page_ignores_accounts_continue_url(monkeypatc
 
     assert page is not None
     assert page["url"] == "https://notebooklm.google.com/"
+
+
+def test_current_personal_hostname_is_recognized():
+
+    assert _is_notebooklm_url("https://notebook.google.com/") is True
+    assert _is_notebooklm_url("https://notebook.google.com/notebook/example") is True
+    assert _is_notebooklm_url("https://notebook.google.com.evil.example/") is False

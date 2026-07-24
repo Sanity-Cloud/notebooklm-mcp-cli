@@ -344,8 +344,8 @@ def temp_notebook():
     """Create a temporary notebook for E2E tests."""
     from notebooklm_tools.core.auth import load_cached_tokens
     from notebooklm_tools.core.client import NotebookLMClient
-    from notebooklm_tools.core.exceptions import AuthenticationError
     from notebooklm_tools.core.errors import ClientAuthenticationError
+    from notebooklm_tools.core.exceptions import AuthenticationError
 
     # Load real auth
     tokens = load_cached_tokens()

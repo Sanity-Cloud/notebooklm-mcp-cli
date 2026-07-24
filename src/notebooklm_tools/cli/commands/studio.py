@@ -3,13 +3,13 @@
 import typer
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from notebooklm_tools.cli.formatters import detect_output_format, get_formatter
+from notebooklm_tools.cli.formatters import detect_output_format, get_formatter, print_json
 from notebooklm_tools.cli.utils import get_client, handle_error, make_console
 from notebooklm_tools.core.alias import get_alias_manager
 from notebooklm_tools.core.exceptions import NLMError
 from notebooklm_tools.services import ServiceError, ValidationError
 from notebooklm_tools.services import studio as studio_service
-from notebooklm_tools.utils.config import get_default_language
+from notebooklm_tools.utils.config import get_base_url, get_default_language
 
 console = make_console()
 
@@ -80,6 +80,7 @@ def _run_create(
     artifact_type: str,
     label: str,
     profile: str | None,
+    json_output: bool = False,
     **kwargs,
 ) -> None:
     """Shared CLI creation logic: spinner + service call + formatted output.
@@ -92,22 +93,31 @@ def _run_create(
 
     try:
         notebook_id = get_alias_manager().resolve(notebook_id)
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            progress.add_task(f"Creating {label}...", total=None)
+
+        def create() -> dict:
             with get_client(profile) as client:
-                result = studio_service.create_artifact(
+                return studio_service.create_artifact(
                     client,
                     notebook_id,
                     artifact_type,
                     **kwargs,
                 )
 
+        if json_output:
+            result = create()
+        else:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                progress.add_task(f"Creating {label}...", total=None)
+                result = create()
+
         # Mind map has a different result shape
-        if artifact_type == "mind_map":
+        if json_output:
+            get_formatter(detect_output_format(True), console).format_item(result)
+        elif artifact_type == "mind_map":
             console.print("[green]✓[/green] Mind map created")
             console.print(f"  ID: {result.get('artifact_id', 'unknown')}")
             console.print(f"  Title: {result.get('title', 'Mind Map')}")
@@ -116,13 +126,15 @@ def _run_create(
             console.print(f"  Artifact ID: {result.get('artifact_id', 'unknown')}")
             console.print(f"\n[dim]Run 'nlm studio status {notebook_id}' to check progress.[/dim]")
     except (ValidationError, ServiceError) as e:
+        if json_output:
+            handle_error(e, json_output=True)
         msg = e.user_message if isinstance(e, ServiceError) else str(e)
         console.print(f"[red]Error:[/red] {msg}")
         if isinstance(e, ServiceError) and "rejected" in str(e):
             console.print("[dim]Try again later or create from NotebookLM UI for diagnosis.[/dim]")
         raise typer.Exit(1) from e
     except NLMError as e:
-        handle_error(e, json_output=locals().get("json_output", False))
+        handle_error(e, json_output=json_output)
 
 
 # ========== Studio Status/Delete ==========
@@ -133,13 +145,55 @@ def studio_status(
     notebook_id: str = typer.Argument(..., help="Notebook ID"),
     full: bool = typer.Option(False, "--full", "-a", help="Show all details"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    mcp_compatible: bool = typer.Option(
+        False,
+        "--mcp-compatible",
+        help="Use the MCP status envelope and artifact_id field",
+    ),
+    artifact_id: str | None = typer.Option(
+        None,
+        "--artifact-id",
+        help="Return only one artifact",
+    ),
+    limit: int | None = typer.Option(None, "--limit", help="Maximum artifacts to return (1-100)"),
+    offset: int = typer.Option(0, "--offset", help="Artifacts to skip"),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to use"),
 ) -> None:
     """List all studio artifacts and their status (including mind maps)."""
     try:
         notebook_id = get_alias_manager().resolve(notebook_id)
+        effective_limit = limit if limit is not None else (20 if mcp_compatible else None)
         with get_client(profile) as client:
-            result = studio_service.get_studio_status(client, notebook_id)
+            result = studio_service.get_studio_status(
+                client,
+                notebook_id,
+                artifact_id=artifact_id,
+                include_details=full if mcp_compatible else True,
+                limit=effective_limit,
+                offset=offset,
+            )
+
+        if mcp_compatible:
+            print_json(
+                {
+                    "status": "success",
+                    "notebook_id": notebook_id,
+                    "summary": {
+                        "total": result["total"],
+                        "completed": result["completed"],
+                        "in_progress": result["in_progress"],
+                    },
+                    "artifacts": result["artifacts"],
+                    "pagination": {
+                        "returned": result["returned"],
+                        "offset": result["offset"],
+                        "limit": result["limit"],
+                        "has_more": result["has_more"],
+                    },
+                    "notebook_url": f"{get_base_url()}/notebook/{notebook_id}",
+                }
+            )
+            return
 
         fmt = detect_output_format(json_output)
         formatter = get_formatter(fmt, console)
@@ -224,6 +278,7 @@ def create_audio(
         help="Comma-separated source IDs",
     ),
     confirm: bool = typer.Option(False, "--confirm", "-y", help="Skip confirmation"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to use"),
 ) -> None:
     """Create an audio overview (podcast) from notebook sources."""
@@ -235,6 +290,7 @@ def create_audio(
         "audio",
         "audio",
         profile=profile,
+        json_output=json_output,
         source_ids=parse_source_ids(source_ids),
         audio_format=format,
         audio_length=length,
@@ -265,6 +321,7 @@ def create_report(
         None, "--source-ids", "-s", help="Comma-separated source IDs"
     ),
     confirm: bool = typer.Option(False, "--confirm", "-y", help="Skip confirmation"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to use"),
 ) -> None:
     """Create a report from notebook sources."""
@@ -280,6 +337,7 @@ def create_report(
         "report",
         "report",
         profile=profile,
+        json_output=json_output,
         source_ids=parse_source_ids(source_ids),
         report_format=format,
         custom_prompt=prompt,
@@ -302,6 +360,7 @@ def create_quiz(
         None, "--source-ids", "-s", help="Comma-separated source IDs"
     ),
     confirm: bool = typer.Option(False, "--confirm", "-y", help="Skip confirmation"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to use"),
 ) -> None:
     """Create a quiz from notebook sources."""
@@ -311,12 +370,7 @@ def create_quiz(
     # Quiz CLI sends raw int codes directly — bypass service string resolution
     try:
         notebook_id_resolved = get_alias_manager().resolve(notebook_id)
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            progress.add_task("Creating quiz...", total=None)
+        if json_output:
             with get_client(profile) as client:
                 result = client.create_quiz(
                     notebook_id_resolved,
@@ -325,19 +379,47 @@ def create_quiz(
                     source_ids=parse_source_ids(source_ids),
                     focus_prompt=focus or "",
                 )
+        else:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                progress.add_task("Creating quiz...", total=None)
+                with get_client(profile) as client:
+                    result = client.create_quiz(
+                        notebook_id_resolved,
+                        question_count=count,
+                        difficulty=difficulty,
+                        source_ids=parse_source_ids(source_ids),
+                        focus_prompt=focus or "",
+                    )
 
         if not result or not result.get("artifact_id"):
-            console.print(
-                "[red]Error:[/red] NotebookLM rejected quiz creation (no artifact returned)."
+            handle_error(
+                ServiceError(
+                    "NotebookLM rejected quiz creation (no artifact returned).",
+                    user_message="NotebookLM rejected quiz creation (no artifact returned).",
+                    hint="Try again later or create from NotebookLM UI for diagnosis.",
+                ),
+                json_output=json_output,
             )
-            console.print("[dim]Try again later or create from NotebookLM UI for diagnosis.[/dim]")
-            raise typer.Exit(1)
 
-        console.print("[green]✓[/green] Quiz generation started")
-        console.print(f"  Artifact ID: {result.get('artifact_id', 'unknown')}")
-        console.print(
-            f"\n[dim]Run 'nlm studio status {notebook_id_resolved}' to check progress.[/dim]"
-        )
+        if json_output:
+            get_formatter(detect_output_format(True), console).format_item(
+                {
+                    "artifact_type": "quiz",
+                    "artifact_id": result["artifact_id"],
+                    "status": result.get("status", "in_progress"),
+                    "message": "Quiz generation started.",
+                }
+            )
+        else:
+            console.print("[green]✓[/green] Quiz generation started")
+            console.print(f"  Artifact ID: {result.get('artifact_id', 'unknown')}")
+            console.print(
+                f"\n[dim]Run 'nlm studio status {notebook_id_resolved}' to check progress.[/dim]"
+            )
     except (ServiceError, NLMError) as e:
         handle_error(e, json_output=locals().get("json_output", False))
 
@@ -358,6 +440,7 @@ def create_flashcards(
         None, "--source-ids", "-s", help="Comma-separated source IDs"
     ),
     confirm: bool = typer.Option(False, "--confirm", "-y", help="Skip confirmation"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to use"),
 ) -> None:
     """Create flashcards from notebook sources."""
@@ -369,6 +452,7 @@ def create_flashcards(
         "flashcards",
         "flashcards",
         profile=profile,
+        json_output=json_output,
         source_ids=parse_source_ids(source_ids),
         difficulty=difficulty,
         focus_prompt=focus or "",
@@ -386,6 +470,7 @@ def create_mindmap(
         None, "--source-ids", "-s", help="Comma-separated source IDs"
     ),
     confirm: bool = typer.Option(False, "--confirm", "-y", help="Skip confirmation"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to use"),
 ) -> None:
     """Create a mind map from notebook sources."""
@@ -397,6 +482,7 @@ def create_mindmap(
         "mind_map",
         "mind map",
         profile=profile,
+        json_output=json_output,
         source_ids=parse_source_ids(source_ids),
         title=title,
     )
@@ -423,6 +509,7 @@ def create_slides(
         None, "--source-ids", "-s", help="Comma-separated source IDs"
     ),
     confirm: bool = typer.Option(False, "--confirm", "-y", help="Skip confirmation"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to use"),
 ) -> None:
     """Create a slide deck from notebook sources."""
@@ -434,6 +521,7 @@ def create_slides(
         "slide_deck",
         "slide deck",
         profile=profile,
+        json_output=json_output,
         source_ids=parse_source_ids(source_ids),
         slide_format=format,
         slide_length=length,
@@ -537,6 +625,7 @@ def create_infographic(
         None, "--source-ids", "-s", help="Comma-separated source IDs"
     ),
     confirm: bool = typer.Option(False, "--confirm", "-y", help="Skip confirmation"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to use"),
 ) -> None:
     """Create an infographic from notebook sources."""
@@ -548,6 +637,7 @@ def create_infographic(
         "infographic",
         "infographic",
         profile=profile,
+        json_output=json_output,
         source_ids=parse_source_ids(source_ids),
         orientation=orientation,
         detail_level=detail,
@@ -580,7 +670,7 @@ def create_video(
     language: str = typer.Option(
         "",
         "--language",
-        help="BCP-47 language code (default: NOTEBOOKLM_HL or en; short format is English-only for now)",
+        help="BCP-47 language code. Short format uses best-effort prompt steering.",
     ),
     focus: str = typer.Option(
         "",
@@ -589,6 +679,7 @@ def create_video(
     ),
     source_ids: str | None = typer.Option(None, "--source-ids", help="Comma-separated source IDs"),
     confirm: bool = typer.Option(False, "--confirm", "-y", help="Skip confirmation"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to use"),
 ) -> None:
     """Create a video overview from notebook sources."""
@@ -600,6 +691,7 @@ def create_video(
         "video",
         "video",
         profile=profile,
+        json_output=json_output,
         source_ids=parse_source_ids(source_ids),
         video_format=format,
         visual_style=style,
@@ -607,6 +699,27 @@ def create_video(
         language=language,
         focus_prompt=focus,
     )
+
+
+@video_app.command("list")
+def list_videos(
+    notebook_id: str = typer.Argument(..., help="Notebook ID"),
+    full: bool = typer.Option(False, "--full", "-a", help="Show all details"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to use"),
+) -> None:
+    """List video artifacts and their status."""
+    try:
+        notebook_id = get_alias_manager().resolve(notebook_id)
+        with get_client(profile) as client:
+            result = studio_service.get_studio_status(client, notebook_id)
+
+        videos = [artifact for artifact in result["artifacts"] if artifact.get("type") == "video"]
+        fmt = detect_output_format(json_output)
+        formatter = get_formatter(fmt, console)
+        formatter.format_artifacts(videos, full=full)
+    except (ServiceError, NLMError) as e:
+        handle_error(e, json_output=locals().get("json_output", False))
 
 
 # ========== Data Table ==========
@@ -623,6 +736,7 @@ def create_data_table(
         None, "--source-ids", "-s", help="Comma-separated source IDs"
     ),
     confirm: bool = typer.Option(False, "--confirm", "-y", help="Skip confirmation"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to use"),
 ) -> None:
     """Create a data table from notebook sources."""
@@ -634,6 +748,7 @@ def create_data_table(
         "data_table",
         "data table",
         profile=profile,
+        json_output=json_output,
         source_ids=parse_source_ids(source_ids),
         description=description,
         language=language,

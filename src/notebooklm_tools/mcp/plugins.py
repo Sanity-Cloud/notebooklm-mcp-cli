@@ -13,7 +13,7 @@ import logging
 import os
 from collections.abc import Callable, Sequence
 from importlib import metadata
-from typing import Any
+from typing import Any, cast
 
 PLUGIN_ENTRY_POINT_GROUP = "notebooklm_tools.mcp_plugins"
 PLUGIN_ENV_VAR = "NOTEBOOKLM_MCP_PLUGINS"
@@ -55,7 +55,7 @@ def _entry_points() -> list[metadata.EntryPoint]:
     eps = metadata.entry_points()
     if hasattr(eps, "select"):
         return list(eps.select(group=PLUGIN_ENTRY_POINT_GROUP))
-    return list(eps.get(PLUGIN_ENTRY_POINT_GROUP, []))  # type: ignore[attr-defined]
+    return list(eps.get(PLUGIN_ENTRY_POINT_GROUP, []))
 
 
 def _load_entry_point(name: str) -> PluginCallable | None:
@@ -70,10 +70,10 @@ def _load_entry_point(name: str) -> PluginCallable | None:
 def _coerce_plugin_callable(obj: Any, spec: str) -> PluginCallable:
     """Normalize a plugin object/module into a callable registration function."""
     if callable(obj):
-        return obj
+        return cast(PluginCallable, obj)
     register = getattr(obj, "register", None)
     if callable(register):
-        return register
+        return cast(PluginCallable, register)
     raise PluginLoadError(
         f"Plugin '{spec}' must be callable or expose a callable register(mcp) function."
     )
