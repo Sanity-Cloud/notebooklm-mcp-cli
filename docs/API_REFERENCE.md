@@ -2,7 +2,7 @@
 
 This document contains detailed API documentation for the internal NotebookLM APIs. Only read this file when debugging API issues or adding new features.
 
-**For general project info, see [CLAUDE.md](./CLAUDE.md)**
+**For general project info, see [CLAUDE.md](../CLAUDE.md)**
 
 ---
 
@@ -202,13 +202,12 @@ result = video_overview_create(
 )
 
 # Check generation status (takes several minutes)
-status = studio_status(notebook_id)
+status = studio_status(notebook_id, artifact_id=result["artifact_id"])
 for artifact in status["artifacts"]:
     print(f"{artifact['title']}: {artifact['status']}")
-    if artifact["audio_url"]:
-        print(f"  Audio: {artifact['audio_url']}")
-    if artifact["video_url"]:
-        print(f"  Video: {artifact['video_url']}")
+
+# Rich fields are opt-in and responses are paginated.
+detailed = studio_status(notebook_id, include_details=True, limit=20, offset=0)
 
 # Delete an artifact (after user confirmation)
 studio_delete(
@@ -220,8 +219,12 @@ studio_delete(
 
 **Audio Formats:** deep_dive (conversation), brief, critique, debate
 **Audio Lengths:** short, default, long
-**Video Formats:** explainer, brief, cinematic, short (vertical, ~60s, English-only, no visual style)
+**Video Formats:** explainer, brief, cinematic, short (vertical, ~60s, no visual style)
 **Video Styles:** auto_select, custom, classic, whiteboard, kawaii, anime, watercolor, retro_print, heritage, paper_craft
+
+For Short videos, language selection is best-effort. The captured RPC uses a
+null language slot, so non-English requests are reinforced through the focus
+prompt rather than an undocumented payload change.
 
 ---
 
@@ -286,6 +289,7 @@ The `f.req` structure:
 | `b7Wfje` | Rename source | `[null, ["source_id"], [[["new_title"]]]]` - path: `/notebook/<notebook_id>` |
 | `tGMBJ` | Delete source | `[[["source_id"]], [2]]` - deletion is IRREVERSIBLE |
 | `hPTbtc` | Get conversation IDs | `[notebook_id]` |
+| `khqZz` | Get conversation turns (full Q&A history) | See "Conversation Turns (khqZz)" below |
 | `hT54vc` | User preferences | - |
 | `ZwVcOc` | Settings | - |
 | `ozz5Z` | Add source v2 (Unified) | See source types below |
@@ -461,6 +465,54 @@ Streaming JSON with multiple chunks:
 1. **Thinking steps** - "Understanding...", "Exploring...", etc.
 2. **Final answer** - Markdown formatted with citations
 3. **Source references** - Links to specific passages in sources
+
+---
+
+## Conversation Turns (`khqZz`)
+
+Discovered via Chrome DevTools capture of the web UI loading a notebook's chat panel
+(2026-07-22). This is a `batchexecute` RPC (unlike the streaming query endpoint above)
+that fetches the **full Q&A history for a past conversation from the server** — it's
+what lets the same chat re-appear after closing and reopening a notebook, and it's what
+`nlm chats get` / `chat_get` / `chat_export` use to show real transcripts even on a
+fresh CLI invocation or MCP server session (`get_conversation_turns()` in
+`core/conversation.py`, wrapping `RPC_GET_CONVERSATION_TURNS`).
+
+Companion to `hPTbtc` (`get_conversation_id`), which only returns the conversation
+UUID — `khqZz` is the RPC that returns the actual turn content for that UUID.
+
+### Request
+```python
+params = [
+    [2, None, [1], [1, None, None, None, None, None, None, None, None, None, [1, 3]]],  # boilerplate client-capability descriptor, same shape used by hPTbtc
+    None,
+    None,
+    "conversation-uuid",  # from get_conversation_id()
+    20,                   # max turns to return (page size; no pagination implemented yet)
+]
+```
+
+### Response
+```
+[[turn, turn, ...], "continuation_token"]
+```
+Turns are returned **newest-first**, alternating **answer then query** per turn pair
+(the same `[answer, None, 2]` / `[query, None, 1]` shape the client already builds
+locally in `_build_conversation_history()` for follow-up queries):
+
+- **Answer turn**: `[turn_id, [unix_sec, nanos], 2, None, content]` where
+  `content[0] = [answer_text, None, [conv_id, conv_id, num]]` — the answer text is
+  nested **one level inside `content[0]`** (`content[0][0]`), not `content[0]` directly.
+  The remaining `content` entries (`content[1]`, `content[3]`, ...) carry rich
+  formatting/citation spans.
+- **Query turn**: `[turn_id, [unix_sec, nanos], 1, "query_text"]`
+
+`get_conversation_turns()` pairs consecutive `(answer, query)` entries, reverses them
+to chronological order, and returns `[{"turn": 1, "query": ..., "answer": ...}, ...]` —
+the same shape as the local-cache-based `get_conversation_history()`. Only plain
+answer/query text is extracted; the rich formatting and citation spans are not yet
+parsed. The `continuation_token` for fetching turns beyond the requested `limit` is
+not yet used (no pagination).
 
 ---
 
@@ -668,9 +720,10 @@ params = [
 **Short format (code 4) — verified via live capture, 2026-06-30:** Short Video
 Overviews have no visual style picker, so the inner options list omits
 `visual_style_code`/`visual_style_prompt` entirely (matching Cinematic), and
-additionally sends `language_code` as `null` (server defaults to `"en"`;
-English-only for now) plus a trailing flag `1` whose meaning is undocumented
-by Google but required for the request to succeed:
+additionally sends `language_code` as `null` plus a trailing flag `1` whose
+meaning is undocumented by Google but required for the request to succeed.
+Current service behavior adds a best-effort language requirement to
+`focus_prompt` for non-English Short requests:
 ```python
 [
     [[source_id1], [source_id2], ...],  # Source IDs
@@ -725,6 +778,16 @@ params = [[2], notebook_id, 'NOT artifact.status = "ARTIFACT_STATUS_SUGGESTED"']
     ...
 ]
 ```
+
+Artifacts with type code `4` use the nested subtype at `[9][1][0]`:
+
+- `1` = flashcards
+- `2` = quiz
+- `4` = mind map
+
+Mind map subtype `4` was confirmed from a live `gArtLc` response on 2026-07-14.
+Older clients that only distinguish flashcards and quizzes will mislabel these
+saved mind maps as flashcards.
 
 ### `V5N4be` - Delete Studio Content
 
@@ -805,7 +868,7 @@ override the accent. This is observed behavior and may change upstream.
 |--------|--------|
 | **Formats** | 1=Explainer (comprehensive), 2=Brief, 3=Cinematic, 4=Short (vertical, ~60s) |
 | **Visual Styles** | 1=Auto-select, 2=Custom, 3=Classic, 4=Whiteboard, 5=Kawaii, 6=Anime, 7=Watercolor, 8=Retro print, 9=Heritage, 10=Paper-craft (not applicable to Cinematic or Short) |
-| **Languages** | BCP-47 codes: "en", "es", "fr", "de", "ja", etc. (Short is English-only for now) |
+| **Languages** | BCP-47 codes: "en", "es", "fr", "de", "ja", etc. Short uses best-effort prompt steering because its RPC language slot is null. |
 
 #### Infographic Request
 ```python
@@ -1075,6 +1138,8 @@ params = [
 | **Difficulty** | `easy` (1), `medium` (2), `hard` (3) - MCP tools accept string names |
 
 **Key Difference from Flashcards:** Quiz uses format code `2` at the first position of the options array, while Flashcards use `1`.
+
+**Mind maps share type code 4 too:** newer mind maps are stored as type-4 studio artifacts with format code `4` at `artifact[9][1][0]` (older mind maps live in the notes store via the `cFji9` RPC). The status parser classifies format code 4 as `mind_map`, and downloading one fetches the artifact's interactive HTML (`v9rmvd`) and extracts the mind map JSON (`{"name": ..., "children": [...]}`) from the `data-app-data` attribute — the same mechanism quiz/flashcards use.
 
 ---
 

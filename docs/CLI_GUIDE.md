@@ -53,11 +53,11 @@ nlm add url <notebook> <url>
 nlm notebook list                      # List all notebooks
 nlm notebook list --json               # JSON output
 nlm notebook create "Title"            # Create notebook
-nlm notebook get <id>                  # Get details
+nlm notebook get <id> --json           # Get details, including notebook emoji
 nlm notebook describe <id>             # AI summary
 nlm notebook rename <id> "New Title"   # Rename
-nlm notebook delete <id> --confirm     # Delete (IRREVERSIBLE)
-nlm notebook query <id> "question"     # Chat with sources
+nlm notebook delete <id> --confirm --json  # Delete with structured confirmation
+nlm notebook query <id> "question" --json # Response includes the original question
 ```
 
 ### Sources
@@ -65,6 +65,7 @@ nlm notebook query <id> "question"     # Chat with sources
 ```bash
 nlm source list <notebook>                         # List sources
 nlm source add <notebook> --url "https://..."      # Add URL
+nlm source add <notebook> --url "https://..." --json  # Return the new source ID as JSON
 nlm source add <notebook> --url "https://..." --wait  # Add and wait until ready
 nlm source add <notebook> --text "content" --title "Notes"  # Add text
 nlm source add <notebook> --file document.pdf --wait  # Upload file
@@ -74,7 +75,7 @@ nlm source get <source-id>                         # Get content
 nlm source describe <source-id>                    # AI summary
 nlm source stale <notebook>                        # Check stale Drive sources
 nlm source sync <notebook> --confirm               # Sync stale sources
-nlm source delete <source-id> --confirm            # Delete (IRREVERSIBLE)
+nlm source delete <source-id> --confirm --json     # Structured deletion result
 ```
 
 ### Studio Content Creation
@@ -82,6 +83,7 @@ nlm source delete <source-id> --confirm            # Delete (IRREVERSIBLE)
 ```bash
 # Audio (podcasts)
 nlm audio create <notebook> --confirm
+nlm audio create <notebook> --confirm --json  # Return the artifact ID as JSON
 nlm audio create <notebook> --format deep_dive --length long --confirm
 nlm audio create <notebook> --language es-419 --confirm  # Latin-American Spanish
 # Formats: deep_dive, brief, critique, debate
@@ -91,8 +93,9 @@ nlm audio create <notebook> --language es-419 --confirm  # Latin-American Spanis
 nlm video create <notebook> --confirm
 nlm video create <notebook> --format explainer --style classic --confirm
 nlm video create <notebook> --style custom --style-prompt "A children's storybook illustration" --confirm
-# Formats: explainer, brief, cinematic, short (vertical, ~60s, English-only)
+# Formats: explainer, brief, cinematic, short (vertical, ~60s)
 # Styles: auto_select, custom, classic, whiteboard, kawaii, anime, watercolor, retro_print, heritage, paper_craft (not for cinematic/short)
+# Short language selection is best-effort; --language adds an explicit requirement to the focus prompt.
 
 # Reports
 nlm report create <notebook> --format "Briefing Doc" --confirm
@@ -136,6 +139,10 @@ nlm download data-table <notebook> <artifact-id> --output data.csv
 # Interactive formats (quiz/flashcards)
 nlm download quiz <notebook> <artifact-id> --format html --output quiz.html
 nlm download flashcards <notebook> <artifact-id> --format markdown --output cards.md
+
+# Download every completed artifact into a per-notebook folder
+nlm download all <notebook> --output-dir ./exports
+nlm download all --all-notebooks --output-dir ./exports --skip-existing
 ```
 
 ### Research
@@ -155,8 +162,16 @@ nlm research import <notebook> <task-id> --cited-only      # Import cited deep r
 
 ```bash
 nlm studio status <notebook>           # Check artifact generation status
+nlm studio status <notebook> --artifact-id <id>  # Poll one artifact
+nlm studio status <notebook> --json --mcp-compatible  # MCP-shaped paginated JSON
+nlm video list <notebook>               # List video artifacts only
 nlm studio delete <notebook> <artifact-id> --confirm  # Delete artifact
 ```
+
+The existing `--json` output remains a plain list for script compatibility and
+contains both `id` and `artifact_id`. `--mcp-compatible` returns the MCP envelope,
+uses lean fields by default, and limits the response to 20 artifacts. Add
+`--full`, `--limit`, or `--offset` when detailed or later-page data is needed.
 
 ### Sharing
 
@@ -332,7 +347,7 @@ Each issue includes a suggested fix (e.g., "Run `nlm login` to authenticate").
 | Flag | Description |
 |------|-------------|
 | (none) | Rich table format |
-| `--json` | JSON output |
+| `--json` | JSON output, including source/Studio creation and deletion results |
 | `--quiet` | IDs only |
 | `--title` | "ID: Title" format |
 | `--full` | All columns |

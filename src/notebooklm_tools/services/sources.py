@@ -1,10 +1,13 @@
 """Sources service — shared validation and logic for source management."""
 
+import os
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 from ..core.client import NotebookLMClient
+from ..core.exceptions import SourceProcessingError
 from ._compat import TypedDict
 from .errors import ServiceError, ValidationError
 
@@ -25,6 +28,26 @@ DRIVE_MIME_TYPES = {
 }
 
 
+def _validate_file_path_allowlist(file_path: str) -> None:
+    configured_dirs = os.environ.get("NOTEBOOKLM_ALLOWED_FILE_DIRS", "")
+    if not configured_dirs:
+        return
+
+    resolved_path = Path(file_path).expanduser().resolve()
+    allowed_dirs = [
+        Path(directory).expanduser().resolve()
+        for directory in configured_dirs.split(os.pathsep)
+        if directory
+    ]
+    if any(resolved_path.is_relative_to(directory) for directory in allowed_dirs):
+        return
+
+    raise ValidationError(
+        f"File path '{resolved_path}' is outside allowed directories configured by "
+        "NOTEBOOKLM_ALLOWED_FILE_DIRS."
+    )
+
+
 class AddSourceResult(TypedDict):
     """Result of adding a source."""
 
@@ -41,6 +64,7 @@ class DriveSourceInfo(TypedDict, total=False):
     type: str
     stale: bool | None
     drive_doc_id: str | None
+    status: int | None
 
 
 class SyncResult(TypedDict):
@@ -190,6 +214,7 @@ def add_source(
         elif source_type == "file":
             if not file_path:
                 raise ValidationError("file_path is required for source_type='file'")
+            _validate_file_path_allowlist(file_path)
             # If a custom title was supplied we must wait for the source to be
             # registered server-side before renaming — the NotebookLM rename
             # RPC accepts the call and returns success data for a source that
@@ -221,6 +246,12 @@ def add_source(
 
     except (ValidationError, ServiceError):
         raise
+    except SourceProcessingError as e:
+        raise ServiceError(
+            e.message,
+            user_message=e.message,
+            hint=e.hint,
+        ) from e
     except Exception as e:
         if source_type == "file" and file_path:
             user_message = f"Could not add file source: {e}"
@@ -416,6 +447,7 @@ def list_drive_sources(
             "id": source.get("id"),
             "title": source.get("title"),
             "type": source.get("source_type_name"),
+            "status": source.get("status"),
         }
 
         if source.get("can_sync"):
@@ -431,6 +463,7 @@ def list_drive_sources(
                 "type": source_type_name if isinstance(source_type_name, str) else "unknown",
                 "stale": (not is_fresh) if is_fresh is not None else None,
                 "drive_doc_id": source.get("drive_doc_id"),
+                "status": source.get("status"),
             }
             drive_sources.append(drive_info)
         else:

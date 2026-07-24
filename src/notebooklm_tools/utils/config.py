@@ -44,6 +44,7 @@ def safe_mkdir(
 
 
 _ALLOWED_BASE_HOSTS = {
+    "notebook.google.com",
     "notebooklm.google.com",
     "notebooklm.cloud.google.com",
 }
@@ -52,7 +53,8 @@ _ALLOWED_BASE_HOSTS = {
 def get_base_url() -> str:
     """Get the NotebookLM base URL.
 
-    Defaults to the personal URL (https://notebooklm.google.com).
+    Defaults to the upstream personal URL (https://notebooklm.google.com).
+    The current Google personal hostname (https://notebook.google.com) is also allowed.
     Set NOTEBOOKLM_BASE_URL to override, e.g. for enterprise:
         export NOTEBOOKLM_BASE_URL=https://notebooklm.cloud.google.com
     """

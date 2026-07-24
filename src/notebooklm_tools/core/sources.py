@@ -26,12 +26,26 @@ import httpx
 from . import constants
 from .base import SOURCE_ADD_TIMEOUT, BaseClient
 from .errors import RPCError
-from .exceptions import FileUploadError, FileValidationError
+from .exceptions import FileUploadError, FileValidationError, SourceProcessingError
 from .retry import execute_with_retry
 
 
 class _NotebookLookupProtocol(Protocol):
     def get_notebook(self, notebook_id: str) -> Any: ...
+
+
+def _resolve_source_type_name(source_type: object, metadata: list[Any]) -> str:
+    """Resolve ambiguous source codes using explicit MIME metadata when available."""
+    if source_type == constants.SOURCE_TYPE_WORD_DOC:
+        mime_type = metadata[19] if len(metadata) > 19 else None
+        if not isinstance(mime_type, str) and len(metadata) > 9:
+            drive_metadata = metadata[9]
+            if isinstance(drive_metadata, list) and len(drive_metadata) > 2:
+                mime_type = drive_metadata[2]
+        if mime_type == "application/pdf":
+            return "pdf"
+
+    return constants.SOURCE_TYPES.get_name(source_type)
 
 
 class SourceMixin(BaseClient):
@@ -112,6 +126,8 @@ class SourceMixin(BaseClient):
         source_id: str,
         timeout: float = 120.0,
         poll_interval: float = 3.0,
+        *,
+        allow_transient_error: bool = True,
     ) -> dict[str, Any]:
         """Wait for a source to finish processing.
 
@@ -136,6 +152,7 @@ class SourceMixin(BaseClient):
                 sources callers typically need to pass a larger value
                 — the CLI's `--wait-timeout` flag defaults to 600s)
             poll_interval: Seconds between status checks (default 3)
+            allow_transient_error: Keep polling unknown sources through status 3
 
         Returns:
             The source dict with status='ready'
@@ -158,11 +175,10 @@ class SourceMixin(BaseClient):
                     # source has already settled into a known terminal
                     # non-audio type. Audio (10) and not-yet-classified
                     # sources (None / 0) may pass through 3 transiently.
-                    if (
-                        status == self.SOURCE_STATUS_ERROR
-                        and source_type in self._NON_AUDIO_TERMINAL_TYPES
+                    if status == self.SOURCE_STATUS_ERROR and (
+                        source_type in self._NON_AUDIO_TERMINAL_TYPES or not allow_transient_error
                     ):
-                        raise RuntimeError(f"Source {source_id} failed to process")
+                        raise SourceProcessingError(source_id)
                     break
             time.sleep(poll_interval)
 
@@ -335,7 +351,10 @@ class SourceMixin(BaseClient):
                                 "id": source_id,
                                 "title": title,
                                 "source_type": source_type,
-                                "source_type_name": constants.SOURCE_TYPES.get_name(source_type),
+                                "source_type_name": _resolve_source_type_name(
+                                    source_type,
+                                    metadata if isinstance(metadata, list) else [],
+                                ),
                                 "url": url,
                                 "drive_doc_id": drive_doc_id,
                                 "can_sync": can_sync,
@@ -996,7 +1015,13 @@ class SourceMixin(BaseClient):
         result = {"id": source_id, "title": filename}
 
         if wait:
-            return self.wait_for_source_ready(notebook_id, source_id, wait_timeout)
+            media_extensions = {".mp3", ".m4a", ".wav", ".aac", ".ogg", ".opus", ".mp4"}
+            return self.wait_for_source_ready(
+                notebook_id,
+                source_id,
+                wait_timeout,
+                allow_transient_error=file_extension in media_extensions,
+            )
 
         return result
 
@@ -1066,7 +1091,7 @@ class SourceMixin(BaseClient):
                     # Source type code is at position 4
                     if len(metadata) > 4:
                         type_code = metadata[4]
-                        source_type = constants.SOURCE_TYPES.get_name(type_code)
+                        source_type = _resolve_source_type_name(type_code, metadata)
 
                     # URL might be at position 7 for web sources
                     if len(metadata) > 7 and isinstance(metadata[7], list):

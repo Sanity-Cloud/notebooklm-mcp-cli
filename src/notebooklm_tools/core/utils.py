@@ -19,6 +19,7 @@ RPC_NAMES = {
     "tGMBJ": "delete_source",
     "b7Wfje": "rename_source",
     "hPTbtc": "get_conversations",
+    "khqZz": "get_conversation_turns",
     "J7Gthc": "delete_chat_history",
     "hT54vc": "preferences",
     "ozz5Z": "add_source_v2",
@@ -113,6 +114,22 @@ def parse_timestamp(ts_array: list | None) -> str | None:
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     except (ValueError, OSError, OverflowError):
         return None
+
+
+def is_mind_map_json(content: Any) -> bool:
+    """Return True if a note-store content string holds mind map JSON.
+
+    The notes RPC returns both regular notes (prose content) and mind maps
+    (stringified JSON with "children"/"nodes" keys) in the same list. This is
+    the single discriminator used by both the notes and mind map listers.
+    """
+    if not content or not isinstance(content, str):
+        return False
+    try:
+        parsed = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return isinstance(parsed, dict) and ("children" in parsed or "nodes" in parsed)
 
 
 def extract_cookies_from_chrome_export(cookie_data: str | list[dict]) -> dict[str, str]:

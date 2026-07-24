@@ -28,7 +28,7 @@ Output on success: `✓ Successfully authenticated!`
 
 ### Check If Already Authenticated
 ```bash
-nlm auth status
+nlm login --check
 ```
 Validates credentials by making a real API call (lists notebooks).
 Shows: `✓ Authenticated` with notebook count, or error if expired.
@@ -88,8 +88,7 @@ nlm status artifacts <notebook>
 
 | Command | Description |
 |---------|-------------|
-| `nlm login` | Authenticate with NotebookLM (**START HERE**) |
-| `nlm auth` | Check authentication status (status, list, delete) |
+| `nlm login` | Authenticate with NotebookLM and manage profiles (**START HERE**) |
 | `nlm config` | View/edit configuration (show, get, set) |
 | `nlm notebook` | Manage notebooks (list, create, get, describe, rename, delete, query) |
 | `nlm source` | Manage sources (list, add, get, describe, content, rename, delete, stale, sync) |
@@ -174,11 +173,10 @@ nlm login --profile work               # Named profile
 nlm login --manual --file <path>       # Import cookies from file
 nlm login --check                      # Only check if auth valid
 nlm login --provider openclaw --cdp-url http://127.0.0.1:18800  # External CDP provider
-
-nlm auth status                        # Check current auth
-nlm auth status --profile work         # Check specific profile
-nlm auth list                          # List all profiles
-nlm auth delete work --confirm         # Delete a profile
+nlm login switch <profile>          # Switch the default profile
+nlm login profile list              # List all profiles with email addresses
+nlm login profile delete <name>     # Delete a profile
+nlm login profile rename <old> <new> # Rename a profile
 ```
 
 
@@ -193,11 +191,11 @@ nlm notebook list --title              # "ID: Title" format
 nlm notebook list --full               # All columns
 
 nlm notebook create "Title"            # Create new notebook
-nlm notebook get <id>                  # Get notebook details
+nlm notebook get <id> --json           # Get details, including notebook emoji
 nlm notebook describe <id>             # AI summary with topics
 nlm notebook describe <id> --json      # JSON output
 nlm notebook rename <id> "New Title"   # Rename notebook
-nlm notebook delete <id> --confirm     # Delete permanently
+nlm notebook delete <id> --confirm --json  # Structured deletion result
 nlm notebook query <id> "question"     # Chat with sources
 nlm notebook query <id> "question" --json  # JSON output
 nlm notebook query <id> "follow up" --conversation-id <cid>  # Persists in web UI history
@@ -226,6 +224,7 @@ nlm source list <notebook-id> --drive  # Show Drive sources with freshness
 nlm source list <notebook-id> --drive --skip-freshness  # Faster, skip freshness checks
 
 nlm source add <notebook-id> --url "https://..."           # Add URL
+nlm source add <notebook-id> --url "https://..." --json    # Return new source ID as JSON
 nlm source add <notebook-id> --url "https://..." --wait    # Add URL and wait until processed
 nlm source add <notebook-id> --url "https://youtube.com/..." # Add YouTube
 nlm source add <notebook-id> --text "content" --title "Title"  # Add text
@@ -244,7 +243,7 @@ nlm source content <source-id>         # Raw text content
 nlm source content <source-id> --json  # JSON output
 nlm source content <source-id> --output file.txt  # Export to file
 nlm source rename <source-id> "New Title" --notebook <notebook-id>  # Rename source
-nlm source delete <source-id> --confirm  # Delete source
+nlm source delete <source-id> --confirm --json  # Structured deletion result
 nlm source stale <notebook-id>         # List stale Drive sources
 nlm source sync <notebook-id> --confirm  # Sync all stale
 nlm source sync <notebook-id> --source-ids <ids> --confirm  # Sync specific
@@ -345,6 +344,7 @@ nlm status research <notebook-id>                        # Check progress
 **Noun-First:**
 ```bash
 nlm audio create <notebook-id> --confirm
+nlm audio create <notebook-id> --confirm --json  # Return artifact ID as JSON
 nlm audio create <notebook-id> --format deep_dive --length default --confirm
 nlm audio create <notebook-id> --format brief --focus "key topic" --confirm
 nlm audio create <notebook-id> --language es-419 --confirm
@@ -473,7 +473,8 @@ nlm create infographic <notebook-id> --orientation portrait --detail detailed --
 nlm video create <notebook-id> --confirm
 nlm video create <notebook-id> --format brief --style whiteboard --confirm
 nlm video create <notebook-id> --format short --confirm
-# Formats: explainer, brief, cinematic, short (default: explainer; short is vertical ~60s, English-only, no --style)
+# Formats: explainer, brief, cinematic, short (default: explainer; short is vertical ~60s, no --style)
+# Non-English Short output is best-effort; --language adds an explicit language requirement to the focus prompt.
 # Styles: auto_select, classic, whiteboard, kawaii, anime, watercolor, retro_print, heritage, paper_craft
 ```
 
@@ -504,6 +505,9 @@ nlm create data-table <notebook-id> "Extract all dates and events" --confirm
 nlm studio status <notebook-id>                    # List all artifacts + status
 nlm studio status <notebook-id> --json             # JSON output
 nlm studio status <notebook-id> --full             # All details
+nlm studio status <notebook-id> --artifact-id <id> # Check one artifact
+nlm studio status <notebook-id> --json --mcp-compatible  # MCP-shaped, paginated JSON
+nlm video list <notebook-id>                        # List video artifacts only
 nlm studio delete <notebook-id> <artifact-id> --confirm  # Delete artifact
 nlm slides revise <artifact-id> --slide '1 instruction' --confirm  # Revise slides
 ```
@@ -808,7 +812,7 @@ Many commands support `--json` for structured output:
 | Flag | Description | Available On |
 |------|-------------|------|
 | (none) | Rich table (human-readable) | All |
-| `--json` | JSON output (for parsing/piping) | list, get, describe, query, content, status |
+| `--json` | JSON output (for parsing/piping) | list, get, describe, query, content, status, source add/delete, notebook delete, Studio create |
 | `--quiet` | IDs only (for piping) | list |
 | `--title` | "ID: Title" format | notebook list |
 | `--url` | "ID: URL" format | source list |
@@ -826,7 +830,7 @@ Many commands support `--json` for structured output:
 | "authentication may have expired" | Session expired | Run `nlm login` |
 | "Notebook not found" | Invalid ID | Run `nlm notebook list` |
 | "Source not found" | Invalid ID | Run `nlm source list <notebook-id>` |
-| "Rate limit exceeded" | Too many API calls | Auto-retried (up to 3x with backoff) |
+| "Rate limit exceeded" | Too many API calls | Briefly auto-retried; Studio limits may require waiting 1-2 minutes |
 | Server 503/502/500 | Google API flaky | Auto-retried (up to 3x with backoff) |
 | "Research already in progress" | Pending research | Use `--force` or import first |
 

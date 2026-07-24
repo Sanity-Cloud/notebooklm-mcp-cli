@@ -7,11 +7,17 @@
 [![Total downloads](https://static.pepy.tech/badge/notebooklm-mcp-cli)](https://pepy.tech/projects/notebooklm-mcp-cli)
 [![Python](https://img.shields.io/pypi/pyversions/notebooklm-mcp-cli)](https://pypi.org/project/notebooklm-mcp-cli/)
 [![License](https://img.shields.io/pypi/l/notebooklm-mcp-cli)](https://github.com/jacob-bd/notebooklm-mcp-cli/blob/main/LICENSE)
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat-square&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jacobbd)
+
+> **SanityCloud fork build:** based on upstream `v0.9.2` and retaining the opt-in MCP plugin loader for local tools, routes, policy gates, and bridges. See [MCP Plugin Guide](docs/MCP_PLUGIN_GUIDE.md).
 
 **Programmatic access to Google NotebookLM** — via command-line interface (CLI) or Model Context Protocol (MCP) server.
 
 > **Note:** Tested with Pro/free and Google AI Ultra ($249/mo) tier accounts. May work with NotebookLM Enterprise accounts but has not been tested.
+
+> ☕ **If you find notebooklm-mcp-cli useful, consider [buying me a coffee](https://buymeacoffee.com/jacobbd).**
+> It's free and built in my spare time — but testing every NotebookLM feature takes real time and resources. A coffee helps me cover it and keep shipping. Thank you! 🙏
+>
+> <a href="https://buymeacoffee.com/jacobbd"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="42"></a>
 
 📺 **Watch the Demos**
 
@@ -46,6 +52,7 @@ nlm notebook create "Research Project"         # Create a notebook
 nlm source add <notebook> --url "https://..."  # Add sources
 nlm audio create <notebook> --confirm          # Generate podcast
 nlm download audio <notebook> <artifact-id>    # Download audio file
+nlm download all <notebook> -d ./exports       # Download every artifact
 nlm share public <notebook>                    # Enable public link
 ```
 
@@ -78,9 +85,11 @@ Then use natural language: *"Create a notebook about quantum computing and gener
 | Create notebook | `nlm notebook create` | `notebook_create` |
 | Add Sources (URL, Text, Drive, File) | `nlm source add` | `source_add` |
 | Query notebook (persists to web UI) | `nlm notebook query` | `notebook_query` |
+| List/view/export chat sessions | `nlm chats list/get/export` | `chat_list`/`chat_get`/`chat_export` |
 | Create Studio Content (Audio, Video, etc.) | `nlm studio create` | `studio_create` |
 | Revise slide decks | `nlm slides revise` | `studio_revise` |
 | Download artifacts | `nlm download <type>` | `download_artifact` |
+| Download all artifacts (one or all notebooks) | `nlm download all` | `download_all_artifacts` |
 | Web/Drive research | `nlm research start` | `research_start` |
 | Share notebook | `nlm share public/invite` | `notebook_share_*` |
 | Sync Drive sources | `nlm source sync` | `source_sync_drive` |
@@ -95,9 +104,10 @@ Then use natural language: *"Create a notebook about quantum computing and gener
 📚 **More Documentation:**
 - **[Getting Started](docs/GETTING_STARTED.md)** — Install, login, agent setup, and migration from another NotebookLM MCP
 - **[CLI Guide](docs/CLI_GUIDE.md)** — Complete command reference
-- **[MCP Guide](docs/MCP_GUIDE.md)** — All 35 MCP tools with examples
+- **[MCP Guide](docs/MCP_GUIDE.md)** — All 43 MCP tools with examples
 - **[Authentication](docs/AUTHENTICATION.md)** — Setup and troubleshooting
 - **[Remote MCP](docs/REMOTE_MCP.md)** — Web/mobile connector feasibility, security, and authentication limitations
+- **[MCP Plugin Guide](docs/MCP_PLUGIN_GUIDE.md)** — SanityCloud opt-in plugin entry points, environment variables, and security guidance
 - **[API Reference](docs/API_REFERENCE.md)** — Internal API docs for contributors
 
 ## Important Disclaimer
@@ -316,7 +326,7 @@ For detailed instructions and troubleshooting, see **[docs/AUTHENTICATION.md](do
 
 ## MCP Configuration
 
-> **⚠️ Context Window Warning:** This MCP provides **39 tools**. Disable it when not using NotebookLM to preserve context. In Claude Code: `@notebooklm-mcp` to toggle.
+> **⚠️ Context Window Warning:** This MCP provides **43 tools**. Disable it when not using NotebookLM to preserve context. In Claude Code: `@notebooklm-mcp` to toggle. To keep it on but expose only a subset, see [Selective tool exposure](docs/MCP_GUIDE.md#selective-tool-exposure).
 
 ### Automatic Setup (Recommended)
 
@@ -491,6 +501,8 @@ Simply chat with your AI tool (Claude Code, Cursor, Gemini CLI) using natural la
 - "Show me all the sources in this notebook with their freshness status"
 - "Delete this source from the notebook"
 - "Check the status of my audio overview generation"
+- "Check this specific artifact without listing every Studio item"
+- "List only the generated videos in this notebook"
 
 ### Sharing & Collaboration
 

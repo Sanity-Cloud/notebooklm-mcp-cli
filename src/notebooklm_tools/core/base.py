@@ -173,6 +173,7 @@ class BaseClient:
 
     # Misc
     RPC_GET_CONVERSATIONS = "hPTbtc"
+    RPC_GET_CONVERSATION_TURNS = "khqZz"  # Fetch full Q&A turn history for a conversation ID
     RPC_DELETE_CHAT_HISTORY = "J7Gthc"
     RPC_PREFERENCES = "hT54vc"
     RPC_SETTINGS = "ZwVcOc"
@@ -1136,6 +1137,7 @@ class BaseClient:
             cached = load_cached_tokens()
             if cached:
                 # Update existing cache with new tokens
+                cached.cookies = self.cookies
                 cached.csrf_token = self.csrf_token
                 cached.session_id = self._session_id
                 if self._bl:
