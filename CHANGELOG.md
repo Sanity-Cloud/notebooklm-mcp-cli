@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Optional MCP plugin loader** — loads explicitly configured module, callable, or `notebooklm_tools.mcp_plugins` entry-point extensions after built-in tools, with strict fail-closed startup by default.
 - **Operator-selectable rate-limit policy** — `NOTEBOOKLM_RATE_LIMIT_RETRY=false` surfaces HTTP 429 and RPC `RESOURCE_EXHAUSTED` responses without replaying the request; the upstream retry behavior remains the default.
 
+### Fixed
+- **Windows Claude Desktop fallback without shell variables** — resolves the current user profile through the Windows shell API when `APPDATA`, `LOCALAPPDATA`, and home variables are unavailable.
+
 ### Compatibility
 - Rebases the private plugin seam onto upstream 0.9.6, retaining the upstream Gemini Notebook host migration, Claude Desktop setup, packaging, and source/result constants.
 
