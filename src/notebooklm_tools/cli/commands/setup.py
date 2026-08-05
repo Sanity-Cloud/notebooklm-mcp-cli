@@ -283,6 +283,26 @@ def _claude_desktop_msix_config_path() -> Path | None:
     return package_dir / "LocalCache" / "Roaming" / "Claude" / "claude_desktop_config.json"
 
 
+def _windows_home_dir() -> Path:
+    """Resolve the Windows user home even when shell variables are unavailable."""
+    try:
+        return Path.home()
+    except RuntimeError:
+        import ctypes
+
+        profile = ctypes.create_unicode_buffer(260)
+        # CSIDL_PROFILE (40) resolves the current user's profile directory.
+        result = ctypes.windll.shell32.SHGetFolderPathW(None, 40, None, 0, profile)
+        if result == 0 and profile.value:
+            return Path(profile.value)
+        try:
+            username = os.getlogin()
+        except OSError as exc:
+            raise RuntimeError("Could not determine Windows home directory.") from exc
+        drive = os.environ.get("SYSTEMDRIVE") or "C:"
+        return Path(f"{drive}\\Users") / username
+
+
 def _claude_desktop_candidate_paths() -> dict[str, Path]:
     """Return regular and Relay AI/3P Claude Desktop config candidates."""
     system = platform.system()
@@ -297,12 +317,12 @@ def _claude_desktop_candidate_paths() -> dict[str, Path]:
         regular_path = _claude_desktop_msix_config_path()
         if regular_path is None:
             appdata = os.environ.get("APPDATA")
-            appdata_path = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+            appdata_path = Path(appdata) if appdata else _windows_home_dir() / "AppData" / "Roaming"
             regular_path = appdata_path / "Claude" / "claude_desktop_config.json"
 
         local_app_data = os.environ.get("LOCALAPPDATA")
         local_app_data_path = (
-            Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+            Path(local_app_data) if local_app_data else _windows_home_dir() / "AppData" / "Local"
         )
         return {
             CLAUDE_DESKTOP_PROFILE_REGULAR: regular_path,
