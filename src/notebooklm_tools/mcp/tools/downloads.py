@@ -4,7 +4,14 @@ import asyncio
 
 from ...services import ServiceError, ValidationError
 from ...services import downloads as downloads_service
-from ._utils import ResultDict, coerce_list, error_result, get_client, logged_tool
+from ._utils import (
+    ResultDict,
+    coerce_list,
+    error_result,
+    get_client,
+    logged_tool,
+    service_error_result,
+)
 
 
 @logged_tool()
@@ -76,7 +83,7 @@ def download_artifact(
             message = message.replace("Unknown artifact type", "Unknown artifact_type", 1)
         return error_result(message)
     except ServiceError as e:
-        return error_result(e.user_message, hint=e.hint)
+        return service_error_result(e)
     except Exception as e:
         return error_result(str(e))
 
@@ -157,6 +164,6 @@ def download_all_artifacts(
     except ValidationError as e:
         return error_result(str(e))
     except ServiceError as e:
-        return error_result(e.user_message, hint=e.hint)
+        return service_error_result(e)
     except Exception as e:
         return error_result(str(e))

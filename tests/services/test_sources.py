@@ -554,6 +554,12 @@ class TestGetSourceContent:
 
         assert exc_info.value.debug_code == "source_not_ready"
         assert exc_info.value.hint is not None
+        assert exc_info.value.details() == {
+            "category": "not_ready",
+            "retryable": True,
+            "suggested_action": "retry_after_delay",
+            "debug_code": "source_not_ready",
+        }
 
     def test_rejects_invalid_poll_interval(self, mock_client):
         with pytest.raises(ValidationError, match="poll_interval"):

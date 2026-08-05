@@ -322,6 +322,9 @@ async def _download_once_async(
                 ),
                 hint="Retry the download after a short delay.",
                 debug_code="artifact_not_ready",
+                category="not_ready",
+                retryable=True,
+                suggested_action="retry_after_delay",
             ) from e
         raise ServiceError(
             f"Failed to download {artifact_type}: {e}",
@@ -339,6 +342,9 @@ async def _download_once_async(
             user_message=f"{artifact_type} is not ready or does not exist.",
             hint="Retry shortly if the artifact was just created.",
             debug_code="artifact_not_ready",
+            category="not_ready",
+            retryable=True,
+            suggested_action="retry_after_delay",
         )
 
     return {"artifact_type": artifact_type, "path": saved_path}
@@ -417,6 +423,9 @@ async def download_async(
                     user_message=f"{artifact_type} is not ready yet.",
                     hint="Retry shortly or increase wait_timeout.",
                     debug_code="artifact_not_ready",
+                    category="not_ready",
+                    retryable=True,
+                    suggested_action="retry_after_delay",
                 ) from e
             await asyncio.sleep(min(poll_interval, remaining))
 

@@ -220,3 +220,38 @@ def test_download_artifact_forwards_readiness_options():
         wait_timeout=9,
         poll_interval=0.5,
     )
+
+
+def test_download_artifact_preserves_not_ready_metadata():
+    mock_client = MagicMock()
+    error = ServiceError(
+        "pending",
+        user_message="Audio is not ready yet.",
+        hint="Retry shortly.",
+        debug_code="artifact_not_ready",
+        category="not_ready",
+        retryable=True,
+        suggested_action="retry_after_delay",
+    )
+
+    with (
+        patch("notebooklm_tools.mcp.tools.downloads.get_client", return_value=mock_client),
+        patch(
+            "notebooklm_tools.mcp.tools.downloads.downloads_service.download_async",
+            new=AsyncMock(side_effect=error),
+        ),
+    ):
+        result = downloads.download_artifact(
+            notebook_id="nb-1",
+            artifact_type="audio",
+            output_path="/tmp/audio.m4a",
+            wait=True,
+        )
+
+    assert result["status"] == "error"
+    assert result["error_details"] == {
+        "category": "not_ready",
+        "retryable": True,
+        "suggested_action": "retry_after_delay",
+        "debug_code": "artifact_not_ready",
+    }
