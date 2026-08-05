@@ -197,10 +197,11 @@ Use `source_add` with these `source_type` values:
 - `url` - Web page or YouTube URL (`url` param)
 - `text` - Pasted content (`text` + `title` params)
 - `file` - Server-local file upload (`file_path` param). The path must exist on
-  the machine running the MCP server, not merely on the client host. Failures
-  preserve the concrete reason and include a host-path hint. Supported:
-  `PDF, TXT, MD, DOCX, CSV, EPUB, MP3, M4A, WAV, AAC, OGG, OPUS, MP4, JPG,
-  JPEG, PNG, GIF, WEBP`.
+  the machine running the MCP server, not merely on the client host. Local
+  admission is case-insensitive and follows the official 43-extension contract:
+  OFFICIAL_FILE_EXTENSIONS: .pdf, .txt, .md, .docx, .csv, .pptx, .epub, .avif, .bmp, .gif, .heic, .heif, .ico, .jp2, .jpe, .jpeg, .jpg, .png, .tif, .tiff, .webp, .3g2, .3gp, .aac, .aif, .aifc, .aiff, .amr, .au, .avi, .cda, .m4a, .mid, .mp3, .mp4, .mpeg, .ogg, .opus, .ra, .ram, .snd, .wav, .wma
+  Admission does not guarantee provider processing success. Corrupt, misleading,
+  inaccessible, or reference-only files can still fail during NotebookLM ingestion.
 - `drive` - Google Drive doc (`document_id` + `doc_type` params)
 
 Other tools: `source_list_drive` (`skip_freshness=True` reports
