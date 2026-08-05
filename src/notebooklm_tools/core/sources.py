@@ -1002,9 +1002,7 @@ class SourceMixin(BaseClient):
                 notebook_id,
                 source_id,
                 wait_timeout,
-                allow_transient_error=(
-                    file_extension in constants.TRANSIENT_MEDIA_FILE_EXTENSIONS
-                ),
+                allow_transient_error=(file_extension in constants.TRANSIENT_MEDIA_FILE_EXTENSIONS),
             )
 
         return result
