@@ -125,3 +125,16 @@ The plugin hook is intentionally generic. Examples of extensions it can support:
 
 Plugins should remain opt-in and should document their own threat model when
 they expose routes, touch local files, or call third-party services.
+## SanityCloud rate-limit policy
+
+The upstream client retries HTTP 429 and RPC `RESOURCE_EXHAUSTED` responses by
+default. Multi-agent runtimes that already coordinate retries externally can
+disable those internal replays:
+
+```text
+NOTEBOOKLM_RATE_LIMIT_RETRY=false
+```
+
+This does not disable connection-establishment retries or authentication
+recovery. It only surfaces rate-limit responses immediately so the external
+queue or coordinator remains the single retry authority.

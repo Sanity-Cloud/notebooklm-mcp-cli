@@ -140,6 +140,7 @@ Environment Variables:
   NOTEBOOKLM_MCP_DEBUG         Debug logging (default: false)
   NOTEBOOKLM_MCP_PLUGINS       Comma-separated optional plugin specs to load
   NOTEBOOKLM_MCP_PLUGIN_STRICT Fail startup on plugin load errors (default: true)
+  NOTEBOOKLM_RATE_LIMIT_RETRY Retry HTTP/RPC rate limits (default: true)
   NOTEBOOKLM_HL                Interface language and default artifact language (default: en)
   NOTEBOOKLM_QUERY_TIMEOUT     Query timeout in seconds (default: 120.0)
 

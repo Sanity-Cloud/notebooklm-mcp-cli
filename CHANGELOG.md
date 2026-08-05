@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.6-sanitycloud.1] - 2026-08-04
+
+### Added
+- **Optional MCP plugin loader** — loads explicitly configured module, callable, or `notebooklm_tools.mcp_plugins` entry-point extensions after built-in tools, with strict fail-closed startup by default.
+- **Operator-selectable rate-limit policy** — `NOTEBOOKLM_RATE_LIMIT_RETRY=false` surfaces HTTP 429 and RPC `RESOURCE_EXHAUSTED` responses without replaying the request; the upstream retry behavior remains the default.
+
+### Compatibility
+- Rebases the private plugin seam onto upstream 0.9.6, retaining the upstream Gemini Notebook host migration, Claude Desktop setup, packaging, and source/result constants.
+
 ## [0.9.6] - 2026-08-03
 
 ### Added
