@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 from notebooklm_tools.mcp.tools.sources import source_get_content, source_list_drive
+from notebooklm_tools.services.errors import ServiceError
 
 
 def test_source_list_drive_forwards_skip_freshness():
@@ -58,3 +59,33 @@ def test_source_get_content_forwards_readiness_options():
         wait_timeout=9,
         poll_interval=0.5,
     )
+
+
+def test_source_get_content_preserves_not_ready_metadata():
+    client = MagicMock()
+    error = ServiceError(
+        "pending",
+        user_message="Source content is not ready yet.",
+        hint="Retry shortly.",
+        debug_code="source_not_ready",
+        category="not_ready",
+        retryable=True,
+        suggested_action="retry_after_delay",
+    )
+
+    with (
+        patch("notebooklm_tools.mcp.tools.sources.get_client", return_value=client),
+        patch(
+            "notebooklm_tools.mcp.tools.sources.sources_service.get_source_content",
+            side_effect=error,
+        ),
+    ):
+        result = source_get_content("src-1", wait=True)
+
+    assert result["status"] == "error"
+    assert result["error_details"] == {
+        "category": "not_ready",
+        "retryable": True,
+        "suggested_action": "retry_after_delay",
+        "debug_code": "source_not_ready",
+    }

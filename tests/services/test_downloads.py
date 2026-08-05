@@ -277,6 +277,12 @@ class TestDownloadAsync:
 
         assert exc_info.value.debug_code == "artifact_not_ready"
         assert exc_info.value.hint is not None
+        assert exc_info.value.details() == {
+            "category": "not_ready",
+            "retryable": True,
+            "suggested_action": "retry_after_delay",
+            "debug_code": "artifact_not_ready",
+        }
 
     @pytest.mark.asyncio
     async def test_non_transient_error_is_not_retried(self, mock_client, monkeypatch):

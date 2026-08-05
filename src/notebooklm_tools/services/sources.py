@@ -715,6 +715,9 @@ def get_source_content(
                 f"No content returned for source {source_id}",
                 user_message="Failed to get source content.",
                 debug_code="source_not_ready",
+                category="not_ready",
+                retryable=True,
+                suggested_action="retry_after_delay",
             )
 
         remaining = deadline - time.monotonic()
@@ -724,5 +727,8 @@ def get_source_content(
                 user_message="Source content is not ready yet.",
                 hint="NotebookLM may still be indexing this source. Retry shortly or increase wait_timeout.",
                 debug_code="source_not_ready",
+                category="not_ready",
+                retryable=True,
+                suggested_action="retry_after_delay",
             )
         time.sleep(min(poll_interval, remaining))
