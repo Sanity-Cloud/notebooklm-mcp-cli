@@ -137,6 +137,7 @@ Environment Variables:
   NOTEBOOKLM_MCP_DEBUG         Debug logging (default: false)
   NOTEBOOKLM_HL                Interface language and default artifact language (default: en)
   NOTEBOOKLM_QUERY_TIMEOUT     Query timeout in seconds (default: 120.0)
+  NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES Retry count for HTTP 429/RPC resource limits (default: 3; 0 disables)
 
 Examples:
   notebooklm-mcp                              # Default stdio transport
