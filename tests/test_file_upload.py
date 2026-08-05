@@ -375,14 +375,79 @@ def temp_notebook():
 
 
 # Gate F1: official file-extension contract alignment
-EXPECTED_EXTENSIONS = frozenset({
-    ".pdf", ".txt", ".md", ".docx", ".csv", ".pptx", ".epub",
-    ".avif", ".bmp", ".gif", ".heic", ".heif", ".ico", ".jp2", ".jpe", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp",
-    ".3g2", ".3gp", ".aac", ".aif", ".aifc", ".aiff", ".amr", ".au", ".avi", ".cda", ".m4a", ".mid", ".mp3", ".mp4", ".mpeg", ".ogg", ".opus", ".ra", ".ram", ".snd", ".wav", ".wma",
-})
-EXPECTED_MEDIA_EXTENSIONS = frozenset({
-    ".3g2", ".3gp", ".aac", ".aif", ".aifc", ".aiff", ".amr", ".au", ".avi", ".cda", ".m4a", ".mid", ".mp3", ".mp4", ".mpeg", ".ogg", ".opus", ".ra", ".ram", ".snd", ".wav", ".wma",
-})
+EXPECTED_EXTENSIONS = frozenset(
+    {
+        ".pdf",
+        ".txt",
+        ".md",
+        ".docx",
+        ".csv",
+        ".pptx",
+        ".epub",
+        ".avif",
+        ".bmp",
+        ".gif",
+        ".heic",
+        ".heif",
+        ".ico",
+        ".jp2",
+        ".jpe",
+        ".jpeg",
+        ".jpg",
+        ".png",
+        ".tif",
+        ".tiff",
+        ".webp",
+        ".3g2",
+        ".3gp",
+        ".aac",
+        ".aif",
+        ".aifc",
+        ".aiff",
+        ".amr",
+        ".au",
+        ".avi",
+        ".cda",
+        ".m4a",
+        ".mid",
+        ".mp3",
+        ".mp4",
+        ".mpeg",
+        ".ogg",
+        ".opus",
+        ".ra",
+        ".ram",
+        ".snd",
+        ".wav",
+        ".wma",
+    }
+)
+EXPECTED_MEDIA_EXTENSIONS = frozenset(
+    {
+        ".3g2",
+        ".3gp",
+        ".aac",
+        ".aif",
+        ".aifc",
+        ".aiff",
+        ".amr",
+        ".au",
+        ".avi",
+        ".cda",
+        ".m4a",
+        ".mid",
+        ".mp3",
+        ".mp4",
+        ".mpeg",
+        ".ogg",
+        ".opus",
+        ".ra",
+        ".ram",
+        ".snd",
+        ".wav",
+        ".wma",
+    }
+)
 CONTRACT_PATTERN = re.compile(r"OFFICIAL_FILE_EXTENSIONS:\s*([^\n]+)")
 
 
@@ -457,9 +522,7 @@ def test_wait_processing_classification_uses_media_subset(
         patch.object(client, "wait_for_source_ready", return_value={"id": "source-id"}) as wait,
     ):
         client.add_file("notebook-id", path, wait=True)
-    wait.assert_called_once_with(
-        "notebook-id", "source-id", 120.0, allow_transient_error=expected
-    )
+    wait.assert_called_once_with("notebook-id", "source-id", 120.0, allow_transient_error=expected)
 
 
 def test_mcp_schema_docstring_matches_registry() -> None:
@@ -476,4 +539,7 @@ def test_mcp_schema_docstring_matches_registry() -> None:
 )
 def test_bundled_documentation_matches_registry(relative_path: str) -> None:
     repository = Path(__file__).resolve().parents[1]
-    assert _parse_contract((repository / relative_path).read_text(encoding="utf-8")) == EXPECTED_EXTENSIONS
+    assert (
+        _parse_contract((repository / relative_path).read_text(encoding="utf-8"))
+        == EXPECTED_EXTENSIONS
+    )
