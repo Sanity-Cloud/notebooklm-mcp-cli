@@ -593,6 +593,112 @@ def _get_process_cmdline(pid: int) -> str | None:
     return None
 
 
+def _iter_process_cmdlines() -> list[tuple[int, str]]:
+    """Return visible process IDs and command lines for profile ownership checks."""
+    system = platform.system()
+    processes: list[tuple[int, str]] = []
+
+    if system == "Linux":
+        try:
+            proc_dirs = Path("/proc").iterdir()
+        except OSError:
+            return processes
+        for proc_dir in proc_dirs:
+            if not proc_dir.name.isdigit():
+                continue
+            try:
+                raw = (proc_dir / "cmdline").read_bytes()
+            except OSError:
+                continue
+            cmdline = raw.replace(b"\x00", b" ").decode("utf-8", errors="replace").strip()
+            if cmdline:
+                processes.append((int(proc_dir.name), cmdline))
+        return processes
+
+    if system == "Darwin":
+        try:
+            result = subprocess.run(
+                ["ps", "-axo", "pid=,command="],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except Exception:
+            return processes
+        if result.returncode != 0:
+            return processes
+        for line in result.stdout.splitlines():
+            parts = line.strip().split(maxsplit=1)
+            if len(parts) == 2 and parts[0].isdigit():
+                processes.append((int(parts[0]), parts[1]))
+        return processes
+
+    if system == "Windows":
+        script = (
+            "Get-CimInstance Win32_Process | "
+            "Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
+        )
+        try:
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", script],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            if result.returncode != 0 or not result.stdout.strip():
+                return processes
+            payload: Any = json.loads(result.stdout)
+        except (Exception, json.JSONDecodeError):
+            return processes
+
+        records: list[Any] = payload if isinstance(payload, list) else [payload]
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            process_id = record.get("ProcessId")
+            cmdline = record.get("CommandLine")
+            if isinstance(process_id, int) and isinstance(cmdline, str) and cmdline.strip():
+                processes.append((process_id, cmdline.strip()))
+
+    return processes
+
+
+def _normalize_profile_path(value: str | Path) -> str:
+    """Normalize a browser profile path for exact platform-aware comparison."""
+    normalized = os.path.normpath(str(value).strip().strip('"')).replace("\\", "/")
+    if platform.system() == "Windows":
+        normalized = normalized.casefold()
+    return normalized.rstrip("/")
+
+
+def _find_profile_browser_pids(profile_name: str, profile_dir: Path | None = None) -> list[int]:
+    """Find browser processes using the exact managed user-data directory."""
+    if profile_dir is None:
+        chrome_path = get_chrome_path()
+        profile_dir = (
+            _get_profile_dir_for_launch(chrome_path, profile_name)
+            if chrome_path
+            else get_chrome_profile_dir(profile_name)
+        )
+
+    expected_dir = _normalize_profile_path(profile_dir)
+    matching_pids: set[int] = set()
+    for process_id, cmdline in _iter_process_cmdlines():
+        normalized_cmdline = cmdline.replace("\\", "/")
+        user_data_dir = _get_cmdline_flag_value(normalized_cmdline, "--user-data-dir")
+        if user_data_dir is None or _normalize_profile_path(user_data_dir) != expected_dir:
+            continue
+        if (
+            "--remote-debugging-port" not in normalized_cmdline
+            and "--type=" not in normalized_cmdline
+        ):
+            continue
+        matching_pids.add(process_id)
+    return sorted(matching_pids)
+
+
 def _get_cmdline_flag_value(cmdline: str, flag: str) -> str | None:
     """Extract a command-line flag value from raw process command text."""
     pattern = rf"(?:^|\s){re.escape(flag)}(?:=|\s+)(?:\"([^\"]*)\"|'([^']*)'|(\S+))"
@@ -1197,11 +1303,61 @@ def _kill_process(pid: int) -> None:
 
     try:
         if platform.system() == "Windows":
-            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, check=False)
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(pid)],
+                capture_output=True,
+                check=False,
+            )
         else:
             os.kill(pid, signal.SIGTERM)
     except Exception:
         pass
+
+
+def _terminate_profile_browsers(profile_name: str, profile_dir: Path) -> None:
+    """Terminate mapped and orphaned browser processes for one managed profile."""
+    profile_pids = set(_find_profile_browser_pids(profile_name, profile_dir))
+    port_map = _read_port_map()
+    retained_entries: dict[str, dict] = {}
+
+    for port_str, entry in port_map.items():
+        if entry.get("profile") != profile_name:
+            retained_entries[port_str] = entry
+            continue
+        process_id = entry.get("pid")
+        try:
+            mapped_port = int(port_str)
+        except ValueError:
+            continue
+        if isinstance(process_id, int) and _mapped_chrome_owns_profile(
+            process_id, profile_name, mapped_port
+        ):
+            profile_pids.add(process_id)
+
+    _save_port_map(retained_entries)
+    for process_id in sorted(profile_pids, reverse=True):
+        _logger.debug(
+            "Terminating browser process %d before clearing profile '%s'",
+            process_id,
+            profile_name,
+        )
+        _kill_process(process_id)
+
+
+def _clear_profile_directory(profile_name: str, profile_dir: Path) -> None:
+    """Stop profile-owned browsers, then remove the managed profile directory."""
+    _terminate_profile_browsers(profile_name, profile_dir)
+    for _attempt in range(20):
+        if not profile_dir.exists():
+            return
+        shutil.rmtree(profile_dir, ignore_errors=True)
+        if not profile_dir.exists():
+            return
+        time.sleep(0.1)
+    raise AuthenticationError(
+        message=f"Could not clear browser profile '{profile_name}'",
+        hint="Close the managed NotebookLM browser window and run the login command again.",
+    )
 
 
 def _kill_stale_nlm_browsers() -> None:
@@ -1237,7 +1393,7 @@ def extract_cookies_via_cdp(
         wait_for_login: If True, wait for user to log in
         login_timeout: Max seconds to wait for login
         profile_name: NLM profile name (each gets its own Chrome user-data-dir)
-        clear_profile: If True, delete the Chrome user-data-dir before launching
+        clear_profile: If True, stop profile-owned browsers and reset their user-data-dir
 
     Returns:
         Dict with cookies, csrf_token, session_id, and email
@@ -1246,17 +1402,13 @@ def extract_cookies_via_cdp(
         AuthenticationError: If extraction fails
     """
     if clear_profile:
-        import shutil
-
         chrome_path = get_chrome_path()
-        if chrome_path:
-            profile_dir = _get_profile_dir_for_launch(chrome_path, profile_name)
-        else:
-            from notebooklm_tools.utils.config import get_chrome_profile_dir
-
-            profile_dir = get_chrome_profile_dir(profile_name)
-        if profile_dir.exists():
-            shutil.rmtree(profile_dir, ignore_errors=True)
+        profile_dir = (
+            _get_profile_dir_for_launch(chrome_path, profile_name)
+            if chrome_path
+            else get_chrome_profile_dir(profile_name)
+        )
+        _clear_profile_directory(profile_name, profile_dir)
 
     # Check if Chrome is running with debugging
     # First, try to find an existing instance on any port in our range
