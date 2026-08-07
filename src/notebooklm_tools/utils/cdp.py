@@ -595,7 +595,7 @@ def _get_process_cmdline(pid: int) -> str | None:
 
 def _resolve_pwsh7_path() -> str:
     """Resolve a real PowerShell 7 executable on Windows or fail closed."""
-    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    program_files = os.environ.get("PROGRAMFILES", r"C:\Program Files")
     candidates = [Path(program_files) / "PowerShell" / "7" / "pwsh.exe"]
     path_candidate = shutil.which("pwsh")
     if path_candidate:
@@ -1024,6 +1024,18 @@ def find_or_create_notebooklm_page_by_cdp_url(cdp_http_url: str) -> dict | None:
         url = page.get("url", "")
         if _is_notebooklm_url(url):
             return page
+
+    # A freshly launched browser normally owns one blank/new-tab page already.
+    # Reuse it before creating another CDP target so interactive login opens a
+    # single NotebookLM tab instead of leaving an unnecessary blank tab behind.
+    for page in pages:
+        url = page.get("url", "")
+        if url in ("about:blank", "chrome://newtab/"):
+            ws_url = _normalize_ws_url(page.get("webSocketDebuggerUrl"))
+            if ws_url:
+                _logger.debug("Reusing blank page with url %s", url)
+                navigate_to_url(ws_url, NOTEBOOKLM_URL)
+                return page
 
     try:
         encoded_url = quote(NOTEBOOKLM_URL, safe="")
@@ -1596,7 +1608,8 @@ def extract_cookies_from_page(
         start_time = time.time()
         last_log_at = 0
         while time.time() - start_time < login_timeout:
-            time.sleep(0.5)
+            # Interactive sign-in is human-paced; avoid high-frequency CDP polling.
+            time.sleep(2.0)
             try:
                 current_url = get_current_url(ws_url)
                 if is_logged_in(current_url):

@@ -114,6 +114,32 @@ def test_find_or_create_notebooklm_page_ignores_accounts_continue_url(monkeypatc
     assert page["url"] == "https://notebooklm.google.com/"
 
 
+def test_find_or_create_notebooklm_page_reuses_blank_tab_before_creating_new_target(monkeypatch) -> None:
+    pages = [
+        {
+            "type": "page",
+            "url": "chrome://newtab/",
+            "webSocketDebuggerUrl": "ws://127.0.0.1:9223/devtools/page/blank",
+        }
+    ]
+    navigated: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(cdp, "get_pages_by_cdp_url", lambda _: pages)
+    monkeypatch.setattr(cdp, "navigate_to_url", lambda ws, url: navigated.append((ws, url)))
+    monkeypatch.setattr(
+        cdp.httpx_client,
+        "put",
+        lambda *_, **__: pytest.fail("blank tab should be reused before creating a new CDP target"),
+    )
+
+    page = cdp.find_or_create_notebooklm_page_by_cdp_url("http://127.0.0.1:9223")
+
+    assert page is pages[0]
+    assert navigated == [
+        ("ws://127.0.0.1:9223/devtools/page/blank", cdp.NOTEBOOKLM_URL)
+    ]
+
+
 def test_extract_cookies_via_cdp_reports_chrome_handoff(monkeypatch) -> None:
     """Regression test for issue #272's secondary bug.
 
