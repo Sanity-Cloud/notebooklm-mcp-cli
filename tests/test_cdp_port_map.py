@@ -225,3 +225,101 @@ def test_get_process_cmdline_reads_linux_proc():
     cmdline = cdp._get_process_cmdline(os.getpid())
     assert cmdline is not None
     assert "python" in cmdline.lower()
+
+
+def test_find_profile_browser_pids_matches_only_exact_profile(tmp_path, monkeypatch):
+    target_dir = tmp_path / "harmonywave13"
+    foreign_dir = tmp_path / "harmonywave13-other"
+    processes = [
+        (
+            101,
+            f'chrome.exe --remote-debugging-port=9223 --user-data-dir="{target_dir}"',
+        ),
+        (102, f'chrome.exe --type=renderer --user-data-dir="{target_dir}"'),
+        (
+            201,
+            f'chrome.exe --remote-debugging-port=9224 --user-data-dir="{foreign_dir}"',
+        ),
+        (301, f'helper.exe --user-data-dir="{target_dir}"'),
+    ]
+    monkeypatch.setattr(cdp, "_iter_process_cmdlines", lambda: processes)
+
+    assert cdp._find_profile_browser_pids("harmonywave13", target_dir) == [101, 102]
+
+
+def test_terminate_profile_browsers_kills_mapped_and_orphaned_processes(
+    storage_dir, tmp_path, monkeypatch
+):
+    profile_dir = tmp_path / "harmonywave13"
+    _write_port_map(
+        storage_dir,
+        {
+            "9223": {"profile": "harmonywave13", "pid": 111},
+            "9224": {"profile": "pte", "pid": 222},
+        },
+    )
+    killed: list[int] = []
+    monkeypatch.setattr(cdp, "_find_profile_browser_pids", lambda *_args: [333, 334])
+    monkeypatch.setattr(
+        cdp,
+        "_mapped_chrome_owns_profile",
+        lambda process_id, _profile, _port: process_id == 111,
+    )
+    monkeypatch.setattr(cdp, "_kill_process", killed.append)
+
+    cdp._terminate_profile_browsers("harmonywave13", profile_dir)
+
+    assert set(killed) == {111, 333, 334}
+    assert json.loads((storage_dir / "chrome-port-map.json").read_text(encoding="utf-8")) == {
+        "9224": {"profile": "pte", "pid": 222}
+    }
+
+
+def test_clear_profile_directory_terminates_browser_before_delete(tmp_path, monkeypatch):
+    profile_dir = tmp_path / "harmonywave13"
+    profile_dir.mkdir()
+    events: list[str] = []
+
+    monkeypatch.setattr(
+        cdp,
+        "_terminate_profile_browsers",
+        lambda _profile, _profile_dir: events.append("terminate"),
+    )
+
+    def remove_profile(path, ignore_errors=False):
+        assert ignore_errors is True
+        events.append("remove")
+        Path(path).rmdir()
+
+    monkeypatch.setattr(cdp.shutil, "rmtree", remove_profile)
+
+    cdp._clear_profile_directory("harmonywave13", profile_dir)
+
+    assert events == ["terminate", "remove"]
+    assert not profile_dir.exists()
+
+def test_resolve_pwsh7_path_prefers_real_program_files_binary(tmp_path, monkeypatch):
+    program_files = tmp_path / "Program Files"
+    expected = program_files / "PowerShell" / "7" / "pwsh.exe"
+    expected.parent.mkdir(parents=True)
+    expected.write_text("", encoding="utf-8")
+    monkeypatch.setenv("ProgramFiles", str(program_files))
+    monkeypatch.setattr(
+        cdp.shutil,
+        "which",
+        lambda _name: r"C:\Users\tester\AppData\Local\Microsoft\WindowsApps\pwsh.exe",
+    )
+
+    assert cdp._resolve_pwsh7_path() == str(expected)
+
+
+def test_resolve_pwsh7_path_fails_closed_without_real_binary(tmp_path, monkeypatch):
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "missing"))
+    monkeypatch.setattr(
+        cdp.shutil,
+        "which",
+        lambda _name: r"C:\Users\tester\AppData\Local\Microsoft\WindowsApps\pwsh.exe",
+    )
+
+    with pytest.raises(RuntimeError, match="PowerShell 7"):
+        cdp._resolve_pwsh7_path()

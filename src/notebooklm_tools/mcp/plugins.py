@@ -52,10 +52,7 @@ def _split_plugin_specs(raw: str | None) -> list[str]:
 
 def _entry_points() -> list[metadata.EntryPoint]:
     """Return installed NotebookLM MCP plugin entry points."""
-    eps = metadata.entry_points()
-    if hasattr(eps, "select"):
-        return list(eps.select(group=PLUGIN_ENTRY_POINT_GROUP))
-    return list(eps.get(PLUGIN_ENTRY_POINT_GROUP, []))
+    return list(metadata.entry_points().select(group=PLUGIN_ENTRY_POINT_GROUP))
 
 
 def _load_entry_point(name: str) -> PluginCallable | None:

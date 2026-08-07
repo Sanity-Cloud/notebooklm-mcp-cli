@@ -1,17 +1,17 @@
-# NotebookLM MCP - Comprehensive Test Plan
+# Gemini Notebook (formerly Google NotebookLM) MCP - Comprehensive Test Plan
 
-**Purpose:** Verify all **30 consolidated MCP tools** work correctly.
+**Purpose:** Verify all **43 MCP tools** work correctly.
 
-**Version:** 2.5 (Updated 2026-07-22 - synchronized current MCP surface)
+**Version:** 2.6 (Updated 2026-08-03 - synchronized current MCP surface)
 
 **Changes from v2.4:**
 - Current tool count: 43 tools — added `chat_list`, `chat_get`, `chat_export` (list/view/export notebook chat sessions)
 
-**Changes from v2.1:**
-- Current tool count: 39 tools (including consolidated notes, labels, async query, batch, pipeline, tags, and server_info)
+**Historical changes from v2.1:**
+- The test plan previously covered 39 tools, including consolidated notes, labels, async query, batch, pipeline, tags, and server_info.
 
-**Changes from v1:**
-- Tools consolidated: 45+ → 29 (-36%)
+**Historical changes from v1:**
+- Tools were consolidated from 45+ to 29 (-36%) before the current 43-tool surface.
 - `source_add(source_type=...)` replaces 4 source tools
 - `studio_create(artifact_type=...)` replaces 9 creation tools
 - `download_artifact(artifact_type=...)` replaces 9 download tools
@@ -59,13 +59,15 @@ Refresh authentication tokens for NotebookLM.
 ### Test 1.2 - Interactive Login (Primary)
 **Tool:** `save_auth_tokens` (Fallback)
 **CLI:** `nlm login` (Launches Chrome for automated extraction)
+**WSL2 CLI:** `nlm login --wsl` (Supports NAT and mirrored networking modes)
 
 **Prompt:**
 ```
 I need to authenticate with NotebookLM.
 ```
 
-**Expected:** Chrome opens, logs in, and tokens are saved.
+**Expected:** Chrome opens, logs in, and tokens are saved. On WSL2, Windows Chrome opens and
+the CDP connection succeeds in both NAT and mirrored networking modes.
 
 ---
 
@@ -952,7 +954,7 @@ Delete note [note_id] in notebook [notebook_id]:
 
 **Prompt:**
 ```
-Get NotebookLM MCP server version and check for updates.
+Get Gemini Notebook MCP server version and check for updates.
 ```
 
 **Expected:**

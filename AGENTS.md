@@ -4,7 +4,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project Overview
 
-**NotebookLM MCP Server & CLI** - Provides programmatic access to NotebookLM (notebooklm.google.com) via both a Model Context Protocol server and a comprehensive command-line interface.
+**Gemini Notebook (formerly Google NotebookLM) MCP Server & CLI** - Provides programmatic access to Gemini Notebook (notebook.google.com) via both a Model Context Protocol server and a comprehensive command-line interface.
 
 Tested with personal/free tier accounts. May work with Google Workspace accounts but has not been tested.
 
@@ -46,7 +46,7 @@ Extract CSRF token and session ID directly from network request - **no page fetc
 
 ```python
 # 1. Navigate to NotebookLM page
-navigate_page(url="https://notebooklm.google.com/")
+navigate_page(url="https://notebook.google.com/")
 
 # 2. Get a batchexecute request (any NotebookLM API call)
 get_network_request(reqid=<any_batchexecute_request>)
@@ -131,7 +131,13 @@ src/notebooklm_tools/
 
 **Executables:**
 - `nlm` - Command-line interface
-- `notebooklm-mcp` - The MCP server
+- `notebooklm-mcp` - The Gemini Notebook MCP server executable
+
+**Configured MCP name:** `gemini-notebook-mcp` (the executable name remains
+`notebooklm-mcp` for compatibility). Claude Desktop setup detects regular and
+Relay AI/3P profiles, never creates missing profiles, and refuses to write
+while the selected Claude instance is running. User-level skill installation
+also requires the target tool to be detected.
 
 ## MCP Tools Provided
 
@@ -185,7 +191,7 @@ src/notebooklm_tools/
 
 ## Features NOT Yet Implemented
 
-None - all NotebookLM features that can be accessed programmatically are implemented.
+None - all Gemini Notebook features that can be accessed programmatically are implemented.
 
 ## Troubleshooting
 
@@ -233,7 +239,7 @@ Only read API_REFERENCE.md when:
 **[docs/MCP_CLI_TEST_PLAN.md](./docs/MCP_CLI_TEST_PLAN.md)**
 
 This includes:
-- Step-by-step test cases for all 29 MCP tools and CLI commands
+- Step-by-step test cases for all 43 MCP tools and CLI commands
 - Authentication and basic operations tests
 - Source management and Drive sync tests
 - Studio content generation tests (audio, video, infographics, etc.)

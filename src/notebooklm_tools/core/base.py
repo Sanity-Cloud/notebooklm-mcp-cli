@@ -67,6 +67,25 @@ def _safe_int_env(name: str, default: int) -> int:
     return value
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    """Read a boolean environment variable with a stable fallback."""
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    logger.warning("Invalid %s=%r; falling back to default %s", name, raw, default)
+    return default
+
+
+def _rate_limit_retries_enabled() -> bool:
+    """Preserve upstream retries unless an operator explicitly disables them."""
+    return _env_bool("NOTEBOOKLM_RATE_LIMIT_RETRY", default=True)
+
+
 def load_rpc_overrides() -> dict[str, str]:
     """Load runtime RPC-ID overrides from NOTEBOOKLM_RPC_OVERRIDES.
 
@@ -130,17 +149,14 @@ class BaseClient:
     from this base class.
     """
 
-    @classmethod
-    def _get_base_url(cls) -> str:
-        return get_base_url()
+    def _get_base_url(self) -> str:
+        return get_base_url(getattr(self, "_base_host", "") or None)
 
-    @classmethod
-    def _get_batchexecute_url(cls) -> str:
-        return f"{cls._get_base_url()}/_/LabsTailwindUi/data/batchexecute"
+    def _get_batchexecute_url(self) -> str:
+        return f"{self._get_base_url()}/_/LabsTailwindUi/data/batchexecute"
 
-    @classmethod
-    def _get_upload_url(cls) -> str:
-        return f"{cls._get_base_url()}/upload/_/"
+    def _get_upload_url(self) -> str:
+        return f"{self._get_base_url()}/upload/_/"
 
     # Keep class-level attributes for backward compatibility with code that
     # reads them directly (e.g. tests). These are the defaults; runtime code
@@ -348,6 +364,7 @@ class BaseClient:
         csrf_token: str = "",
         session_id: str = "",
         build_label: str = "",
+        base_host: str = "",
     ):
         """
         Initialize the base client.
@@ -357,6 +374,8 @@ class BaseClient:
             csrf_token: CSRF token (optional - will be auto-extracted from page if not provided)
             session_id: Session ID (optional - will be auto-extracted from page if not provided)
             build_label: Build label / bl param (optional - auto-extracted from page if not provided)
+            base_host: Host the account is signed in on, e.g. "notebook.google.com"
+                (optional - falls back to NOTEBOOKLM_BASE_URL or the default host)
         """
         import time as _time
 
@@ -365,6 +384,7 @@ class BaseClient:
         self._client: httpx.Client | None = None
         self._session_id = session_id
         self._bl = build_label
+        self._base_host = base_host
         self._created_at: float = _time.time()
 
         # Conversation cache for follow-up queries.
@@ -800,6 +820,13 @@ class BaseClient:
         try:
             return self._extract_rpc_result(parsed, rpc_id)
         except ResourceExhaustedError:
+            if not _rate_limit_retries_enabled():
+                logger.warning(
+                    "RPC rate limit (RESOURCE_EXHAUSTED) on %s; not retrying because "
+                    "NOTEBOOKLM_RATE_LIMIT_RETRY is disabled.",
+                    rpc_id,
+                )
+                raise
             if _server_retry < DEFAULT_MAX_RETRIES:
                 import time as _time
 
@@ -909,11 +936,17 @@ class BaseClient:
             return result
 
         except httpx.HTTPStatusError as e:
+            status = e.response.status_code
+            if status == 429 and not _rate_limit_retries_enabled():
+                logger.warning(
+                    "HTTP 429 rate limit; not retrying because "
+                    "NOTEBOOKLM_RATE_LIMIT_RETRY is disabled."
+                )
+                raise
             # Retry on transient server errors (5xx, 429) with exponential backoff
             if is_retryable_error(e):
                 import time as _time
 
-                status = e.response.status_code
                 # Use _server_retry to track retries across recursive calls
                 if _server_retry < DEFAULT_MAX_RETRIES:
                     delay = min(DEFAULT_BASE_DELAY * (2**_server_retry), DEFAULT_MAX_DELAY)
@@ -978,6 +1011,13 @@ class BaseClient:
             raise
 
         except ResourceExhaustedError:
+            if not _rate_limit_retries_enabled():
+                logger.warning(
+                    "RPC rate limit (RESOURCE_EXHAUSTED) on %s; not retrying because "
+                    "NOTEBOOKLM_RATE_LIMIT_RETRY is disabled.",
+                    rpc_id,
+                )
+                raise
             # RPC-level rate limit (HTTP 200, error code 8). Back off and retry.
             if _server_retry < DEFAULT_MAX_RETRIES:
                 import time as _time

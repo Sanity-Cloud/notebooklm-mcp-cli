@@ -26,7 +26,7 @@ from httpx import Client, HTTPTransport
 
 # Disable proxy for localhost CDP connections — system proxies (Surge, Clash, etc.)
 # can intercept localhost requests and break Chrome DevTools Protocol connections.
-# See: https://github.com/jacob-bd/notebooklm-mcp-cli/issues/119
+# See: https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/119
 httpx_client = Client(
     trust_env=False,
     mounts={
@@ -67,7 +67,7 @@ def _normalize_ws_url(url: str | None) -> str | None:
     causing WinError 10013.  Using the explicit IPv4 loopback
     address avoids the ambiguity on all platforms.
 
-    See: https://github.com/jacob-bd/notebooklm-mcp-cli/issues/108
+    See: https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/108
     """
     if url and "://localhost:" in url:
         url = url.replace("://localhost:", "://127.0.0.1:")
@@ -591,6 +591,128 @@ def _get_process_cmdline(pid: int) -> str | None:
         except Exception:
             return None
     return None
+
+
+def _resolve_pwsh7_path() -> str:
+    """Resolve a real PowerShell 7 executable on Windows or fail closed."""
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    candidates = [Path(program_files) / "PowerShell" / "7" / "pwsh.exe"]
+    path_candidate = shutil.which("pwsh")
+    if path_candidate:
+        candidates.append(Path(path_candidate))
+    for candidate in candidates:
+        candidate_text = str(candidate)
+        if "windowsapps" in candidate_text.casefold():
+            continue
+        if candidate.is_file() and candidate.name.casefold() == "pwsh.exe":
+            return candidate_text
+    raise RuntimeError("PowerShell 7 (pwsh.exe) is required for Windows process inspection")
+
+
+def _iter_process_cmdlines() -> list[tuple[int, str]]:
+    """Return visible process IDs and command lines for profile ownership checks."""
+    system = platform.system()
+    processes: list[tuple[int, str]] = []
+
+    if system == "Linux":
+        try:
+            proc_dirs = Path("/proc").iterdir()
+        except OSError:
+            return processes
+        for proc_dir in proc_dirs:
+            if not proc_dir.name.isdigit():
+                continue
+            try:
+                raw = (proc_dir / "cmdline").read_bytes()
+            except OSError:
+                continue
+            cmdline = raw.replace(b"\x00", b" ").decode("utf-8", errors="replace").strip()
+            if cmdline:
+                processes.append((int(proc_dir.name), cmdline))
+        return processes
+
+    if system == "Darwin":
+        try:
+            result = subprocess.run(
+                ["ps", "-axo", "pid=,command="],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except Exception:
+            return processes
+        if result.returncode != 0:
+            return processes
+        for line in result.stdout.splitlines():
+            parts = line.strip().split(maxsplit=1)
+            if len(parts) == 2 and parts[0].isdigit():
+                processes.append((int(parts[0]), parts[1]))
+        return processes
+
+    if system == "Windows":
+        script = (
+            "Get-CimInstance Win32_Process | "
+            "Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
+        )
+        try:
+            result = subprocess.run(
+                [_resolve_pwsh7_path(), "-NoProfile", "-Command", script],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            if result.returncode != 0 or not result.stdout.strip():
+                return processes
+            payload: Any = json.loads(result.stdout)
+        except (Exception, json.JSONDecodeError):
+            return processes
+
+        records: list[Any] = payload if isinstance(payload, list) else [payload]
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            process_id = record.get("ProcessId")
+            cmdline = record.get("CommandLine")
+            if isinstance(process_id, int) and isinstance(cmdline, str) and cmdline.strip():
+                processes.append((process_id, cmdline.strip()))
+
+    return processes
+
+
+def _normalize_profile_path(value: str | Path) -> str:
+    """Normalize a browser profile path for exact platform-aware comparison."""
+    normalized = os.path.normpath(str(value).strip().strip('"')).replace("\\", "/")
+    if platform.system() == "Windows":
+        normalized = normalized.casefold()
+    return normalized.rstrip("/")
+
+
+def _find_profile_browser_pids(profile_name: str, profile_dir: Path | None = None) -> list[int]:
+    """Find browser processes using the exact managed user-data directory."""
+    if profile_dir is None:
+        chrome_path = get_chrome_path()
+        profile_dir = (
+            _get_profile_dir_for_launch(chrome_path, profile_name)
+            if chrome_path
+            else get_chrome_profile_dir(profile_name)
+        )
+
+    expected_dir = _normalize_profile_path(profile_dir)
+    matching_pids: set[int] = set()
+    for process_id, cmdline in _iter_process_cmdlines():
+        normalized_cmdline = cmdline.replace("\\", "/")
+        user_data_dir = _get_cmdline_flag_value(normalized_cmdline, "--user-data-dir")
+        if user_data_dir is None or _normalize_profile_path(user_data_dir) != expected_dir:
+            continue
+        if (
+            "--remote-debugging-port" not in normalized_cmdline
+            and "--type=" not in normalized_cmdline
+        ):
+            continue
+        matching_pids.add(process_id)
+    return sorted(matching_pids)
 
 
 def _get_cmdline_flag_value(cmdline: str, flag: str) -> str | None:
@@ -1118,9 +1240,10 @@ def _is_notebooklm_url(url: str) -> bool:
     except Exception:
         return False
     return host in {
-        "notebook.google.com",
         "notebooklm.google.com",
+        "notebook.google.com",
         "notebooklm.cloud.google.com",
+        "notebook.cloud.google.com",
     }
 
 
@@ -1196,11 +1319,61 @@ def _kill_process(pid: int) -> None:
 
     try:
         if platform.system() == "Windows":
-            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, check=False)
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(pid)],
+                capture_output=True,
+                check=False,
+            )
         else:
             os.kill(pid, signal.SIGTERM)
     except Exception:
         pass
+
+
+def _terminate_profile_browsers(profile_name: str, profile_dir: Path) -> None:
+    """Terminate mapped and orphaned browser processes for one managed profile."""
+    profile_pids = set(_find_profile_browser_pids(profile_name, profile_dir))
+    port_map = _read_port_map()
+    retained_entries: dict[str, dict] = {}
+
+    for port_str, entry in port_map.items():
+        if entry.get("profile") != profile_name:
+            retained_entries[port_str] = entry
+            continue
+        process_id = entry.get("pid")
+        try:
+            mapped_port = int(port_str)
+        except ValueError:
+            continue
+        if isinstance(process_id, int) and _mapped_chrome_owns_profile(
+            process_id, profile_name, mapped_port
+        ):
+            profile_pids.add(process_id)
+
+    _save_port_map(retained_entries)
+    for process_id in sorted(profile_pids, reverse=True):
+        _logger.debug(
+            "Terminating browser process %d before clearing profile '%s'",
+            process_id,
+            profile_name,
+        )
+        _kill_process(process_id)
+
+
+def _clear_profile_directory(profile_name: str, profile_dir: Path) -> None:
+    """Stop profile-owned browsers, then remove the managed profile directory."""
+    _terminate_profile_browsers(profile_name, profile_dir)
+    for _attempt in range(20):
+        if not profile_dir.exists():
+            return
+        shutil.rmtree(profile_dir, ignore_errors=True)
+        if not profile_dir.exists():
+            return
+        time.sleep(0.1)
+    raise AuthenticationError(
+        message=f"Could not clear browser profile '{profile_name}'",
+        hint="Close the managed NotebookLM browser window and run the login command again.",
+    )
 
 
 def _kill_stale_nlm_browsers() -> None:
@@ -1236,7 +1409,7 @@ def extract_cookies_via_cdp(
         wait_for_login: If True, wait for user to log in
         login_timeout: Max seconds to wait for login
         profile_name: NLM profile name (each gets its own Chrome user-data-dir)
-        clear_profile: If True, delete the Chrome user-data-dir before launching
+        clear_profile: If True, stop profile-owned browsers and reset their user-data-dir
 
     Returns:
         Dict with cookies, csrf_token, session_id, and email
@@ -1245,17 +1418,13 @@ def extract_cookies_via_cdp(
         AuthenticationError: If extraction fails
     """
     if clear_profile:
-        import shutil
-
         chrome_path = get_chrome_path()
-        if chrome_path:
-            profile_dir = _get_profile_dir_for_launch(chrome_path, profile_name)
-        else:
-            from notebooklm_tools.utils.config import get_chrome_profile_dir
-
-            profile_dir = get_chrome_profile_dir(profile_name)
-        if profile_dir.exists():
-            shutil.rmtree(profile_dir, ignore_errors=True)
+        profile_dir = (
+            _get_profile_dir_for_launch(chrome_path, profile_name)
+            if chrome_path
+            else get_chrome_profile_dir(profile_name)
+        )
+        _clear_profile_directory(profile_name, profile_dir)
 
     # Check if Chrome is running with debugging
     # First, try to find an existing instance on any port in our range
@@ -1314,6 +1483,28 @@ def extract_cookies_via_cdp(
 
     if not debugger_url:
         startup_error = _summarize_browser_startup_failure(_chrome_process)
+        handed_off = (
+            not reused_existing
+            and _chrome_process is not None
+            and _chrome_process.poll() is not None
+        )
+        if handed_off:
+            # Chrome was already running under a different process, so the browser we
+            # launched handed off to it and exited immediately without ever binding the
+            # remote-debugging port.
+            hint = (
+                "Fully quit Chrome (all windows) and run 'nlm login' again. "
+                "If that doesn't help, use 'nlm login --manual' to import cookies from a file."
+            )
+            if startup_error:
+                hint = f"{hint} ({startup_error})"
+            raise AuthenticationError(
+                message=(
+                    "Chrome is already running, so the sign-in browser couldn't start "
+                    "with remote debugging."
+                ),
+                hint=hint,
+            )
         hint = "Use 'nlm login --manual' to import cookies from a file."
         if startup_error:
             hint = f"{hint} Browser startup error: {startup_error}"
@@ -1443,6 +1634,7 @@ def extract_cookies_from_page(
     session_id = extract_session_id(html)
     email = extract_email(html)
     build_label = extract_build_label(html)
+    base_host = urlparse(current_url).hostname or ""
 
     return {
         "cookies": cookies,
@@ -1450,6 +1642,7 @@ def extract_cookies_from_page(
         "session_id": session_id,
         "email": email,
         "build_label": build_label,
+        "base_host": base_host,
     }
 
 
@@ -1642,12 +1835,14 @@ def run_headless_auth(
         # html already fetched by _wait_for_page_ready
         csrf_token = extract_csrf_token(html)
         session_id = extract_session_id(html)
+        base_host = urlparse(current_url).hostname or ""
 
         # Create and save tokens
         tokens = AuthTokens(
             cookies=cookies_list,
             csrf_token=csrf_token or "",
             session_id=session_id or "",
+            base_host=base_host,
             extracted_at=time.time(),
         )
         save_tokens_to_cache(tokens)

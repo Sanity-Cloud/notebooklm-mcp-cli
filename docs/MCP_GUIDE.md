@@ -1,6 +1,6 @@
 # MCP Guide
 
-Complete reference for the NotebookLM MCP server — **43 tools** for AI assistants.
+Complete reference for the Gemini Notebook (formerly Google NotebookLM) MCP server — **43 tools** for AI assistants.
 
 ## Installation
 
@@ -9,20 +9,21 @@ Complete reference for the NotebookLM MCP server — **43 tools** for AI assista
 uv tool install notebooklm-mcp-cli
 
 # Add to Claude Code
-claude mcp add --scope user notebooklm-mcp notebooklm-mcp
+claude mcp add --scope user gemini-notebook-mcp notebooklm-mcp
 
 # Add to Gemini CLI
-gemini mcp add --scope user notebooklm-mcp notebooklm-mcp
+gemini mcp add --scope user gemini-notebook-mcp notebooklm-mcp
 ```
 
-> **Server naming:** Use `notebooklm-mcp` (the default) as the server
-> name when registering with your agent. If you have a legacy
-> browser-automation NotebookLM MCP installed under a different name
+> **Server naming:** Use `gemini-notebook-mcp` as the server name when
+> registering with your agent. The executable remains `notebooklm-mcp`.
+> If you have a legacy
+> browser-automation Gemini Notebook MCP installed under a different name
 > (e.g. `notebooklm`), remove that one first — agents like Hermes get
 > confused when two servers expose overlapping tool names
 > (`notebook_create`, `source_add`, `notebook_query`, …).
 >
-> See the [Migrating from another NotebookLM MCP](GETTING_STARTED.md#migrating-from-another-notebooklm-mcp)
+> See the [Migrating from another Gemini Notebook MCP](GETTING_STARTED.md#migrating-from-another-notebooklm-mcp)
 > section in the Getting Started guide for the full step-by-step.
 
 ## Authentication
@@ -291,7 +292,7 @@ studio_create(notebook_id, artifact_type="report", report_format="Study Guide", 
 studio_create(notebook_id, artifact_type="audio", language="es-419", confirm=True)
 ```
 
-For Audio Overviews, NotebookLM has been observed using BCP-47 region
+For Audio Overviews, Gemini Notebook has been observed using BCP-47 region
 subtags to select the voice accent. `es` and `es-ES` produce Spain Spanish,
 while `es-US` and `es-419` produce Latin-American Spanish. The generation
 prompt does not reliably override the accent. Treat this as observed behavior,
@@ -330,7 +331,7 @@ pipeline(action="run", notebook_id="abc", pipeline_name="ingest-and-podcast", in
 
 > Planning to connect from Claude web/mobile or expose the server over a
 > network? Read [Remote MCP Deployment](REMOTE_MCP.md) first. HTTP transport
-> support does not provide HTTPS, caller authentication, per-user NotebookLM
+> support does not provide HTTPS, caller authentication, per-user Gemini Notebook
 > accounts, or remote file transfer.
 
 ### MCP Server Options
@@ -348,19 +349,14 @@ pipeline(action="run", notebook_id="abc", pipeline_name="ingest-and-podcast", in
 | `NOTEBOOKLM_MCP_TRANSPORT` | Transport type |
 | `NOTEBOOKLM_MCP_PORT` | HTTP/SSE port |
 | `NOTEBOOKLM_MCP_DEBUG` | Enable debug logging |
-| `NOTEBOOKLM_MCP_PLUGINS` | Comma-separated plugin module, `module:callable`, or installed entry-point names |
-| `NOTEBOOKLM_MCP_PLUGIN_AUTOLOAD` | Load all installed `notebooklm_tools.mcp_plugins` entry points (default: false) |
-| `NOTEBOOKLM_MCP_PLUGIN_STRICT` | Fail startup when a configured plugin fails to load (default: true) |
 | `NOTEBOOKLM_HL` | Interface language and default artifact locale, including regional BCP-47 values such as `es-419` (default: en) |
 | `NOTEBOOKLM_QUERY_TIMEOUT` | Query timeout (seconds) |
-| `NOTEBOOKLM_BASE_URL` | Override base URL. Allowed personal hosts: `https://notebooklm.google.com` and `https://notebook.google.com`; Enterprise: `https://notebooklm.cloud.google.com`. |
+| `NOTEBOOKLM_BASE_URL` | Override base URL for Enterprise/Workspace (default: `https://notebook.google.com`) |
 | `NOTEBOOKLM_DOWNLOAD_DIR` | Optional directory boundary for artifact downloads. Unset preserves the default behavior. |
 | `NOTEBOOKLM_ALLOWED_FILE_DIRS` | Optional OS-separated list of directories allowed for local file sources. Unset means unrestricted. |
 | `NOTEBOOKLM_DISABLED_GROUPS` | Comma-separated tool groups to hide (see [Selective tool exposure](#selective-tool-exposure)) |
 | `NOTEBOOKLM_DISABLED_TOOLS` | Comma-separated individual tools to hide |
 | `NOTEBOOKLM_ENABLED_TOOLS` | Comma-separated tools to re-enable, overriding the two above |
-
-Plugin behavior and threat-model requirements are documented in [MCP Plugin Guide](MCP_PLUGIN_GUIDE.md).
 
 ---
 
@@ -368,7 +364,7 @@ Plugin behavior and threat-model requirements are documented in [MCP Plugin Guid
 
 This MCP has **43 tools** which consume context. Best practices:
 
-- **Disable when not using**: In Claude Code, use `@notebooklm-mcp` to toggle
+- **Disable when not using**: In Claude Code, use `@gemini-notebook-mcp` to toggle
 - **Hide tools you don't need**: See [Selective tool exposure](#selective-tool-exposure) below to expose only a subset
 - **Use unified tools**: `source_add`, `studio_create`, `download_artifact`, `download_all_artifacts` handle multiple operations each
 - **Poll wisely**: Use `studio_status` sparingly - artifacts take 1-5 minutes
@@ -417,7 +413,7 @@ nlm setup add json              # Any other tool (interactive JSON generator)
 
 ### Claude Code
 ```bash
-claude mcp add --scope user notebooklm-mcp notebooklm-mcp
+claude mcp add --scope user gemini-notebook-mcp notebooklm-mcp
 ```
 
 ### Cursor
@@ -425,7 +421,7 @@ Add to `~/.cursor/mcp.json`:
 ```json
 {
   "mcpServers": {
-    "notebooklm-mcp": {
+    "gemini-notebook-mcp": {
       "command": "/path/to/notebooklm-mcp"
     }
   }
@@ -437,7 +433,7 @@ Add to `.vscode/mcp.json`:
 ```json
 {
   "servers": {
-    "notebooklm-mcp": {
+    "gemini-notebook-mcp": {
       "command": "notebooklm-mcp",
       "args": []
     }
@@ -447,7 +443,7 @@ Add to `.vscode/mcp.json`:
 
 ### Gemini CLI
 ```bash
-gemini mcp add --scope user notebooklm-mcp notebooklm-mcp
+gemini mcp add --scope user gemini-notebook-mcp notebooklm-mcp
 ```
 
 </details>

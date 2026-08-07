@@ -33,6 +33,7 @@ class AuthTokens:
     csrf_token: str = ""  # Optional - auto-extracted from page
     session_id: str = ""  # Optional - auto-extracted from page
     build_label: str = ""  # Optional - auto-extracted from page (cfb2h key)
+    base_host: str = ""  # Optional - host the browser was signed in on (issue #269)
     extracted_at: float = 0.0
 
     def to_dict(self) -> dict:
@@ -41,6 +42,7 @@ class AuthTokens:
             "csrf_token": self.csrf_token,
             "session_id": self.session_id,
             "build_label": self.build_label,
+            "base_host": self.base_host,
             "extracted_at": self.extracted_at,
         }
 
@@ -51,6 +53,7 @@ class AuthTokens:
             csrf_token=data.get("csrf_token", ""),
             session_id=data.get("session_id", ""),
             build_label=data.get("build_label", ""),
+            base_host=data.get("base_host", ""),
             extracted_at=data.get("extracted_at", 0),
         )
 
@@ -97,6 +100,7 @@ def load_cached_tokens() -> AuthTokens | None:
                 csrf_token=profile.csrf_token or "",
                 session_id=profile.session_id or "",
                 build_label=profile.build_label or "",
+                base_host=profile.base_host or "",
                 extracted_at=(
                     profile.last_validated.timestamp() if profile.last_validated else time.time()
                 ),
@@ -137,7 +141,7 @@ def save_tokens_to_cache(tokens: AuthTokens, silent: bool = False) -> None:
 
     Writing to both locations ensures the MCP server and CLI always read
     the same credentials regardless of which code path loads them.
-    See: https://github.com/jacob-bd/notebooklm-mcp-cli/issues/169
+    See: https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/169
 
     Args:
         tokens: AuthTokens to save
@@ -163,6 +167,7 @@ def save_tokens_to_cache(tokens: AuthTokens, silent: bool = False) -> None:
                 csrf_token=tokens.csrf_token or None,
                 session_id=tokens.session_id or None,
                 build_label=tokens.build_label or None,
+                base_host=tokens.base_host or None,
                 force=True,
             )
     except Exception as e:
@@ -303,6 +308,7 @@ class Profile:
         email: str | None = None,
         last_validated: Any = None,
         build_label: str | None = None,
+        base_host: str | None = None,
     ) -> None:
         self.name = name
         self.cookies = cookies
@@ -311,6 +317,7 @@ class Profile:
         self.email = email
         self.last_validated = last_validated
         self.build_label = build_label
+        self.base_host = base_host
 
     def to_dict(self) -> dict:
         """Convert profile to dictionary for serialization."""
@@ -321,6 +328,7 @@ class Profile:
             "session_id": self.session_id,
             "email": self.email,
             "build_label": self.build_label,
+            "base_host": self.base_host,
             "last_validated": (self.last_validated.isoformat() if self.last_validated else None),
         }
 
@@ -346,6 +354,7 @@ class Profile:
             email=data.get("email"),
             last_validated=last_validated,
             build_label=data.get("build_label"),
+            base_host=data.get("base_host"),
         )
 
 
@@ -410,6 +419,7 @@ class AuthManager:
                     else None
                 ),
                 build_label=metadata.get("build_label"),
+                base_host=metadata.get("base_host"),
             )
             return self._profile
         except Exception as e:
@@ -426,6 +436,7 @@ class AuthManager:
         email: str | None = None,
         force: bool = False,
         build_label: str | None = None,
+        base_host: str | None = None,
     ) -> Profile:
         """Save credentials to the current profile.
 
@@ -482,6 +493,7 @@ class AuthManager:
             "session_id": session_id,
             "email": email,
             "build_label": build_label,
+            "base_host": base_host,
             "last_validated": datetime.now().isoformat(),
         }
         fd = os.open(str(self.metadata_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -501,6 +513,7 @@ class AuthManager:
             email=email,
             last_validated=datetime.now(),
             build_label=build_label,
+            base_host=base_host,
         )
         return self._profile
 
@@ -741,6 +754,7 @@ def check_auth(
                 session_id=p.session_id,
                 email=p.email,
                 build_label=p.build_label,
+                base_host=p.base_host,
             )
             return AuthCheckResult(
                 valid=True,
@@ -783,6 +797,7 @@ def check_auth(
             csrf_token=p.csrf_token or "",
             session_id=p.session_id or "",
             build_label=p.build_label or "",
+            base_host=p.base_host or "",
         )
         try:
             client.list_notebooks()
@@ -814,6 +829,7 @@ def check_auth(
         session_id=refreshed_session or p.session_id,
         email=p.email,
         build_label=refreshed_bl or p.build_label,
+        base_host=p.base_host,
     )
     return AuthCheckResult(
         valid=True,
