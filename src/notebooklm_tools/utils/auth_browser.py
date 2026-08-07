@@ -6,7 +6,17 @@ from typing import Any
 from notebooklm_tools.core.exceptions import AuthenticationError
 from notebooklm_tools.utils.config import get_config, get_profile_dir
 
-CHROMIUM_BROWSER_KEYS = {"auto", "chrome", "arc", "brave", "edge", "chromium", "vivaldi", "opera"}
+CHROMIUM_BROWSER_KEYS = {
+    "auto",
+    "chrome",
+    "arc",
+    "brave",
+    "edge",
+    "edge-beta",
+    "chromium",
+    "vivaldi",
+    "opera",
+}
 
 
 def _normalize_browser(preferred: str | None = None) -> str:

@@ -161,3 +161,57 @@ def test_get_headers_flattens_list_cookies(tmp_path, monkeypatch):
     assert "SID=google" in headers["Cookie"]
     assert "youtube" not in headers["Cookie"]
     assert headers["X-Goog-Csrf-Token"] == "csrf1"
+
+
+def test_edge_beta_is_a_supported_explicit_auth_browser():
+    from notebooklm_tools.utils.auth_browser import CHROMIUM_BROWSER_KEYS
+
+    assert "edge-beta" in CHROMIUM_BROWSER_KEYS
+
+
+def test_select_auth_backend_passes_edge_beta_preference():
+    from notebooklm_tools.utils.auth_browser import select_auth_backend
+
+    with (
+        patch(
+            "notebooklm_tools.utils.cdp._get_chromium_path", return_value="msedge-beta"
+        ) as get_path,
+        patch(
+            "notebooklm_tools.utils.cdp.get_browser_display_name",
+            return_value="Microsoft Edge Beta",
+        ),
+    ):
+        backend = select_auth_backend("edge-beta")
+
+    get_path.assert_called_once_with("edge-beta")
+    assert backend == {"backend": "chromium_cdp", "browser": "Microsoft Edge Beta"}
+
+
+def test_get_chromium_path_selects_edge_beta_candidate(tmp_path, monkeypatch):
+    from notebooklm_tools.utils import cdp
+
+    beta = tmp_path / "msedge.exe"
+    beta.write_bytes(b"")
+    monkeypatch.setattr(cdp.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        cdp,
+        "_windows_browser_candidates",
+        lambda: [
+            ("Google Chrome", str(tmp_path / "missing-chrome.exe")),
+            ("Microsoft Edge Beta", str(beta)),
+        ],
+    )
+    monkeypatch.setattr(cdp, "_detected_browser_name", None)
+
+    assert cdp._get_chromium_path("edge-beta") == str(beta)
+    assert cdp.get_browser_display_name() == "Microsoft Edge Beta"
+
+
+def test_windows_candidates_include_edge_beta_install_locations():
+    from notebooklm_tools.utils.cdp import _windows_browser_candidates
+
+    beta_paths = [
+        path for name, path in _windows_browser_candidates() if name == "Microsoft Edge Beta"
+    ]
+    assert beta_paths
+    assert any(r"Microsoft\Edge Beta\Application\msedge.exe" in path for path in beta_paths)
