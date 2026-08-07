@@ -593,6 +593,22 @@ def _get_process_cmdline(pid: int) -> str | None:
     return None
 
 
+def _resolve_pwsh7_path() -> str:
+    """Resolve a real PowerShell 7 executable on Windows or fail closed."""
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    candidates = [Path(program_files) / "PowerShell" / "7" / "pwsh.exe"]
+    path_candidate = shutil.which("pwsh")
+    if path_candidate:
+        candidates.append(Path(path_candidate))
+    for candidate in candidates:
+        candidate_text = str(candidate)
+        if "windowsapps" in candidate_text.casefold():
+            continue
+        if candidate.is_file() and candidate.name.casefold() == "pwsh.exe":
+            return candidate_text
+    raise RuntimeError("PowerShell 7 (pwsh.exe) is required for Windows process inspection")
+
+
 def _iter_process_cmdlines() -> list[tuple[int, str]]:
     """Return visible process IDs and command lines for profile ownership checks."""
     system = platform.system()
@@ -641,7 +657,7 @@ def _iter_process_cmdlines() -> list[tuple[int, str]]:
         )
         try:
             result = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", script],
+                [_resolve_pwsh7_path(), "-NoProfile", "-Command", script],
                 capture_output=True,
                 text=True,
                 timeout=20,
