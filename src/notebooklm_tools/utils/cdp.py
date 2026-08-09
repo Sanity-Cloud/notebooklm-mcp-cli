@@ -1864,7 +1864,11 @@ def run_headless_auth(
             base_host=base_host,
             extracted_at=time.time(),
         )
-        save_tokens_to_cache(tokens)
+        save_tokens_to_cache(
+            tokens,
+            profile=profile_name,
+            email=extract_email(html) or None,
+        )
 
         # Clean up cache to minimize profile size
         cleanup_chrome_profile_cache(profile_name)

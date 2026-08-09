@@ -136,45 +136,63 @@ def load_cached_tokens() -> AuthTokens | None:
         return None
 
 
-def save_tokens_to_cache(tokens: AuthTokens, silent: bool = False) -> None:
-    """Save tokens to both the legacy auth.json and the active profile.
+def save_tokens_to_cache(
+    tokens: AuthTokens,
+    silent: bool = False,
+    profile: str | None = None,
+    email: str | None = None,
+) -> None:
+    """Save tokens to the selected profile and, when appropriate, legacy auth.json.
 
-    Writing to both locations ensures the MCP server and CLI always read
-    the same credentials regardless of which code path loads them.
+    Explicit named-profile refreshes must not overwrite the configured default
+    profile or the process-wide legacy auth cache. The legacy cache is updated
+    only when saving the configured default profile (or when no explicit
+    profile was supplied for backward compatibility).
     See: https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/169
 
     Args:
         tokens: AuthTokens to save
         silent: If True, don't print confirmation message (for auto-updates)
+        profile: Optional named auth profile to update
+        email: Optional verified account email for profile identity metadata
     """
-    cache_path = get_cache_path()
-    fd = os.open(str(cache_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        f = os.fdopen(fd, "w", encoding="utf-8")
-    except BaseException:
-        os.close(fd)
-        raise
-    with f:
-        json.dump(tokens.to_dict(), f, indent=2)
+    from notebooklm_tools.utils.config import get_config
 
-    # Also update the default profile so load_cached_tokens() (which
-    # checks profiles first) picks up the same tokens.
+    default_profile = get_config().auth.default_profile
+    target_profile = profile or default_profile
+    sync_legacy = profile is None or target_profile == default_profile
+
+    cache_path = get_cache_path()
+    if sync_legacy:
+        fd = os.open(str(cache_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            f = os.fdopen(fd, "w", encoding="utf-8")
+        except BaseException:
+            os.close(fd)
+            raise
+        with f:
+            json.dump(tokens.to_dict(), f, indent=2)
+
+    # Always update the intended profile. For explicit non-default profiles,
+    # this is intentionally the only persistent write.
     try:
-        manager = get_auth_manager()
-        if manager.profile_exists():
-            manager.save_profile(
-                cookies=tokens.cookies,
-                csrf_token=tokens.csrf_token or None,
-                session_id=tokens.session_id or None,
-                build_label=tokens.build_label or None,
-                base_host=tokens.base_host or None,
-                force=True,
-            )
+        manager = get_auth_manager(target_profile)
+        manager.save_profile(
+            cookies=tokens.cookies,
+            csrf_token=tokens.csrf_token or None,
+            session_id=tokens.session_id or None,
+            email=email,
+            build_label=tokens.build_label or None,
+            base_host=tokens.base_host or None,
+            force=True,
+        )
     except Exception as e:
         logger.debug(f"Failed to sync tokens to profile: {e}")
 
     if not silent:
-        logger.info(f"Auth tokens cached to {cache_path}")
+        if sync_legacy:
+            logger.info(f"Auth tokens cached to {cache_path}")
+        logger.info(f"Auth tokens cached to profile {target_profile}")
 
 
 def extract_tokens_via_chrome_devtools() -> AuthTokens | None:

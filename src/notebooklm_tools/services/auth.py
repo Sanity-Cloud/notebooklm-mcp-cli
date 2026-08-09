@@ -77,9 +77,19 @@ def load_cached_tokens():
     return _core_auth.load_cached_tokens()
 
 
-def save_tokens_to_cache(tokens, silent: bool = False):
+def save_tokens_to_cache(
+    tokens,
+    silent: bool = False,
+    profile: str | None = None,
+    email: str | None = None,
+):
     """Re-export of `notebooklm_tools.core.auth.save_tokens_to_cache`."""
-    return _core_auth.save_tokens_to_cache(tokens, silent=silent)
+    return _core_auth.save_tokens_to_cache(
+        tokens,
+        silent=silent,
+        profile=profile,
+        email=email,
+    )
 
 
 def get_cache_path():

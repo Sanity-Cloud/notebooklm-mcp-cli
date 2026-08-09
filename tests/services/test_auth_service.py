@@ -86,19 +86,31 @@ def test_shim_load_cached_tokens_forwards_to_core(monkeypatch):
 
 
 def test_shim_save_tokens_to_cache_forwards_kwargs(monkeypatch):
-    """`save_tokens_to_cache` wrapper must forward (tokens, silent=...) to
+    """`save_tokens_to_cache` wrapper must forward profile-aware kwargs to
     the core implementation.
     """
     captured = {}
 
-    def _fake_save(tokens, silent=False):
+    def _fake_save(tokens, silent=False, profile=None, email=None):
         captured["tokens"] = tokens
         captured["silent"] = silent
+        captured["profile"] = profile
+        captured["email"] = email
 
     sentinel_tokens = object()
     monkeypatch.setattr(core_auth, "save_tokens_to_cache", _fake_save, raising=True)
-    services_auth.save_tokens_to_cache(sentinel_tokens, silent=True)
-    assert captured == {"tokens": sentinel_tokens, "silent": True}
+    services_auth.save_tokens_to_cache(
+        sentinel_tokens,
+        silent=True,
+        profile="work",
+        email="work@example.com",
+    )
+    assert captured == {
+        "tokens": sentinel_tokens,
+        "silent": True,
+        "profile": "work",
+        "email": "work@example.com",
+    }
 
 
 def test_shim_validate_cookies_forwards_to_core(monkeypatch):

@@ -37,6 +37,7 @@ class TestRunHeadlessAuthCapturesBaseHost:
             ),
             patch.object(cdp, "extract_csrf_token", return_value="csrf"),
             patch.object(cdp, "extract_session_id", return_value="sid"),
+            patch.object(cdp, "extract_email", return_value="user@example.com"),
             patch.object(cdp, "cleanup_chrome_profile_cache", return_value=0),
             patch("notebooklm_tools.core.auth.save_tokens_to_cache") as mock_save,
         ):
@@ -52,3 +53,12 @@ class TestRunHeadlessAuthCapturesBaseHost:
         tokens, _ = self._run_with_current_url("https://notebooklm.google.com/")
         assert tokens is not None
         assert tokens.base_host == "notebooklm.google.com"
+
+    def test_headless_refresh_saves_to_requested_profile(self):
+        tokens, mock_save = self._run_with_current_url("https://notebook.google.com/")
+        assert tokens is not None
+        mock_save.assert_called_once_with(
+            tokens,
+            profile="default",
+            email="user@example.com",
+        )

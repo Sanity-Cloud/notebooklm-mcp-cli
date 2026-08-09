@@ -689,6 +689,7 @@ def profile_rename(
     """Rename an authentication profile."""
     from notebooklm_tools.core.exceptions import NLMError
     from notebooklm_tools.services.auth import AuthManager
+    from notebooklm_tools.utils.config import get_storage_dir
 
     # Check if old profile exists
     old_auth = AuthManager(old_name)
@@ -700,6 +701,16 @@ def profile_rename(
     new_auth = AuthManager(new_name)
     if new_auth.profile_exists():
         console.print(f"[red]Error:[/red] Profile '{new_name}' already exists")
+        raise typer.Exit(1)
+
+    chrome_root = get_storage_dir() / "chrome-profiles"
+    old_chrome = chrome_root / old_name
+    new_chrome = chrome_root / new_name
+    if old_chrome.exists() and new_chrome.exists():
+        console.print(
+            f"[red]Error:[/red] Browser profile '{new_name}' already exists; "
+            "refusing to split auth and browser identity"
+        )
         raise typer.Exit(1)
 
     try:
@@ -716,8 +727,20 @@ def profile_rename(
             base_host=profile_data.base_host,
         )
 
-        # Delete old profile
-        old_auth.delete_profile()
+        # Keep the isolated browser identity aligned with the auth profile.
+        browser_moved = False
+        if old_chrome.exists():
+            old_chrome.rename(new_chrome)
+            browser_moved = True
+
+        try:
+            # Delete old auth profile only after both new identities exist.
+            old_auth.delete_profile()
+        except Exception:
+            if browser_moved and new_chrome.exists() and not old_chrome.exists():
+                new_chrome.rename(old_chrome)
+            new_auth.delete_profile()
+            raise
 
         console.print(f"[green]✓[/green] Renamed profile from '{old_name}' to '{new_name}'")
     except NLMError as e:
