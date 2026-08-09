@@ -238,9 +238,13 @@ def launch_windows_chrome(
     # struggles with UNC paths (\\wsl.localhost\...) for its profile dir.
     import tempfile
 
+    ps_path = _get_powershell_path()
+    if ps_path is None:
+        raise RuntimeError("PowerShell 7 (pwsh.exe) is required on the Windows side")
+
     try:
         win_temp_base = subprocess.run(
-            ["powershell.exe", "-Command", "echo $env:TEMP"],
+            [str(ps_path), "-NoProfile", "-Command", "$env:TEMP"],
             capture_output=True,
             text=True,
             check=True,
@@ -405,12 +409,9 @@ def get_wsl_cdp_url(port: int = DEFAULT_WSL_CDP_PORT) -> str | None:
 
 
 def _get_powershell_path() -> Path | None:
-    """Find PowerShell executable on Windows side from WSL."""
-    # Try PowerShell 7 (pwsh) first, then Windows PowerShell
+    """Find PowerShell 7 on the Windows side from WSL; never fall back to 5.1."""
     candidates = [
         "/mnt/c/Program Files/PowerShell/7/pwsh.exe",
-        "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
-        "/mnt/c/Windows/SysWOW64/WindowsPowerShell/v1.0/powershell.exe",
     ]
     for candidate in candidates:
         path = Path(candidate)

@@ -81,9 +81,36 @@ def _env_bool(name: str, default: bool) -> bool:
     return default
 
 
-def _rate_limit_retries_enabled() -> bool:
-    """Preserve upstream retries unless an operator explicitly disables them."""
-    return _env_bool("NOTEBOOKLM_RATE_LIMIT_RETRY", default=True)
+def _rate_limit_max_retries() -> int:
+    """Return the retry ceiling for HTTP 429 and RPC RESOURCE_EXHAUSTED errors.
+
+    The default preserves the standard transport retry behavior. Setting
+    ``NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES=0`` surfaces rate limits immediately,
+    which is useful when a caller or queue owns retry scheduling. The
+    SanityCloud compatibility switch ``NOTEBOOKLM_RATE_LIMIT_RETRY=false``
+    remains a fail-fast alias and takes precedence when explicitly disabled.
+    """
+    if not _env_bool("NOTEBOOKLM_RATE_LIMIT_RETRY", default=True):
+        return 0
+
+    name = "NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES"
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return DEFAULT_MAX_RETRIES
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid %s=%r; falling back to default %d",
+            name,
+            raw,
+            DEFAULT_MAX_RETRIES,
+        )
+        return DEFAULT_MAX_RETRIES
+    if value < 0:
+        logger.warning("%s=%d is negative; clamping to 0", name, value)
+        return 0
+    return value
 
 
 def load_rpc_overrides() -> dict[str, str]:
@@ -365,6 +392,7 @@ class BaseClient:
         session_id: str = "",
         build_label: str = "",
         base_host: str = "",
+        profile_name: str | None = None,
     ):
         """
         Initialize the base client.
@@ -376,6 +404,8 @@ class BaseClient:
             build_label: Build label / bl param (optional - auto-extracted from page if not provided)
             base_host: Host the account is signed in on, e.g. "notebook.google.com"
                 (optional - falls back to NOTEBOOKLM_BASE_URL or the default host)
+            profile_name: Auth profile that owns these credentials. Uses the
+                configured default when omitted.
         """
         import time as _time
 
@@ -385,6 +415,7 @@ class BaseClient:
         self._session_id = session_id
         self._bl = build_label
         self._base_host = base_host
+        self._profile_name = profile_name
         self._created_at: float = _time.time()
 
         # Conversation cache for follow-up queries.
@@ -767,6 +798,7 @@ class BaseClient:
             build_fallback = self._bl
 
         context = get_cdp_page_context(
+            profile_name=self._profile_name,
             timeout=timeout or DEFAULT_TIMEOUT,
             csrf_fallback=csrf_fallback,
             session_fallback=session_fallback,
@@ -820,14 +852,8 @@ class BaseClient:
         try:
             return self._extract_rpc_result(parsed, rpc_id)
         except ResourceExhaustedError:
-            if not _rate_limit_retries_enabled():
-                logger.warning(
-                    "RPC rate limit (RESOURCE_EXHAUSTED) on %s; not retrying because "
-                    "NOTEBOOKLM_RATE_LIMIT_RETRY is disabled.",
-                    rpc_id,
-                )
-                raise
-            if _server_retry < DEFAULT_MAX_RETRIES:
+            max_retries = _rate_limit_max_retries()
+            if _server_retry < max_retries:
                 import time as _time
 
                 delay = min(DEFAULT_BASE_DELAY * (2**_server_retry), DEFAULT_MAX_DELAY)
@@ -835,7 +861,7 @@ class BaseClient:
                     "RPC rate limit (RESOURCE_EXHAUSTED) on %s, attempt %d/%d, retrying in %.1fs...",
                     rpc_id,
                     _server_retry + 1,
-                    DEFAULT_MAX_RETRIES + 1,
+                    max_retries + 1,
                     delay,
                 )
                 _time.sleep(delay)
@@ -936,22 +962,19 @@ class BaseClient:
             return result
 
         except httpx.HTTPStatusError as e:
-            status = e.response.status_code
-            if status == 429 and not _rate_limit_retries_enabled():
-                logger.warning(
-                    "HTTP 429 rate limit; not retrying because "
-                    "NOTEBOOKLM_RATE_LIMIT_RETRY is disabled."
-                )
-                raise
-            # Retry on transient server errors (5xx, 429) with exponential backoff
+            # Retry on transient server errors (5xx, 429) with exponential backoff.
+            # Rate limits have a separate ceiling so external schedulers can own
+            # retry policy without disabling safe connection or 5xx retries.
             if is_retryable_error(e):
                 import time as _time
 
+                status = e.response.status_code
+                max_retries = _rate_limit_max_retries() if status == 429 else DEFAULT_MAX_RETRIES
                 # Use _server_retry to track retries across recursive calls
-                if _server_retry < DEFAULT_MAX_RETRIES:
+                if _server_retry < max_retries:
                     delay = min(DEFAULT_BASE_DELAY * (2**_server_retry), DEFAULT_MAX_DELAY)
                     logger.warning(
-                        f"Server error {status} on attempt {_server_retry + 1}/{DEFAULT_MAX_RETRIES + 1}, "
+                        f"Server error {status} on attempt {_server_retry + 1}/{max_retries + 1}, "
                         f"retrying in {delay:.1f}s..."
                     )
                     _time.sleep(delay)
@@ -1011,15 +1034,9 @@ class BaseClient:
             raise
 
         except ResourceExhaustedError:
-            if not _rate_limit_retries_enabled():
-                logger.warning(
-                    "RPC rate limit (RESOURCE_EXHAUSTED) on %s; not retrying because "
-                    "NOTEBOOKLM_RATE_LIMIT_RETRY is disabled.",
-                    rpc_id,
-                )
-                raise
             # RPC-level rate limit (HTTP 200, error code 8). Back off and retry.
-            if _server_retry < DEFAULT_MAX_RETRIES:
+            max_retries = _rate_limit_max_retries()
+            if _server_retry < max_retries:
                 import time as _time
 
                 delay = min(DEFAULT_BASE_DELAY * (2**_server_retry), DEFAULT_MAX_DELAY)
@@ -1027,7 +1044,7 @@ class BaseClient:
                     "RPC rate limit (RESOURCE_EXHAUSTED) on %s, attempt %d/%d, retrying in %.1fs...",
                     rpc_id,
                     _server_retry + 1,
-                    DEFAULT_MAX_RETRIES + 1,
+                    max_retries + 1,
                     delay,
                 )
                 _time.sleep(delay)
@@ -1174,7 +1191,7 @@ class BaseClient:
             from .auth import AuthTokens, load_cached_tokens, save_tokens_to_cache
 
             # Load existing cache or create new
-            cached = load_cached_tokens()
+            cached = load_cached_tokens(profile_name=self._profile_name)
             if cached:
                 # Update existing cache with new tokens
                 cached.cookies = self.cookies
@@ -1192,7 +1209,7 @@ class BaseClient:
                     extracted_at=time.time(),
                 )
 
-            save_tokens_to_cache(cached, silent=True)
+            save_tokens_to_cache(cached, silent=True, profile_name=self._profile_name)
         except Exception as e:
             # Non-critical: caching is an optimization, but log at debug level
             logger.debug(f"Failed to update auth token cache: {e}")
@@ -1204,12 +1221,9 @@ class BaseClient:
         """
         from .auth import load_cached_tokens
 
-        # Layer 2: Reload cookies from disk (profile or legacy auth.json).
-        # load_cached_tokens() checks the default profile first, then falls
-        # back to the legacy auth.json file.  We no longer gate on
-        # auth.json existence so that users who only have profile-based
-        # credentials (from `nlm login`) are not skipped.
-        cached = load_cached_tokens()
+        # Layer 2: Reload cookies from the same profile on disk. The configured
+        # default may also fall back to legacy auth.json for compatibility.
+        cached = load_cached_tokens(profile_name=self._profile_name)
         if cached and cached.cookies:
             # Always reload from disk when auth fails - current tokens are known-bad
             # The cached tokens may be fresher (user ran nlm login)
@@ -1220,12 +1234,12 @@ class BaseClient:
                 self._session_id = ""  # Force re-extraction of session ID
             return True
 
-        # Try headless auth if the configured default Chrome profile exists.
+        # Try headless auth for the same profile that owns this client.
         try:
             from notebooklm_tools.utils.auth_browser import run_headless_auth
             from notebooklm_tools.utils.config import get_config
 
-            profile_name = get_config().auth.default_profile
+            profile_name = self._profile_name or get_config().auth.default_profile
             tokens = run_headless_auth(profile_name=profile_name)
             if tokens:
                 with self._state_lock:

@@ -249,7 +249,12 @@ def source_describe(source_id: str) -> ResultDict:
 
 
 @logged_tool()
-def source_get_content(source_id: str) -> ResultDict:
+def source_get_content(
+    source_id: str,
+    wait: bool = False,
+    wait_timeout: float = 120.0,
+    poll_interval: float = 3.0,
+) -> ResultDict:
     """Get raw text content of a source (no AI processing).
 
     Returns the original indexed text from PDFs, web pages, pasted text,
@@ -257,12 +262,21 @@ def source_get_content(source_id: str) -> ResultDict:
 
     Args:
         source_id: Source UUID
+        wait: Poll until indexed content is available
+        wait_timeout: Maximum seconds to wait when ``wait`` is enabled
+        poll_interval: Seconds between readiness checks
 
     Returns: content (str), title (str), source_type (str), char_count (int)
     """
     try:
         client = get_client()
-        result = sources_service.get_source_content(client, source_id)
+        result = sources_service.get_source_content(
+            client,
+            source_id,
+            wait=wait,
+            wait_timeout=wait_timeout,
+            poll_interval=poll_interval,
+        )
         return {"status": "success", **result}
     except ServiceError as e:
         return error_result(e.user_message, hint=e.hint)

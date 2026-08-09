@@ -5,8 +5,9 @@ from unittest.mock import Mock, patch
 import httpx
 import pytest
 
-from notebooklm_tools.core.base import BaseClient
+from notebooklm_tools.core.base import BaseClient, _rate_limit_max_retries
 from notebooklm_tools.core.errors import ResourceExhaustedError, RPCDriftError
+from notebooklm_tools.core.retry import DEFAULT_MAX_RETRIES
 
 
 def _client():
@@ -145,62 +146,192 @@ def test_call_rpc_does_not_retry_read_timeout():
     assert mock_get_client.return_value.post.call_count == 1
 
 
-def test_call_rpc_resource_exhausted_fails_fast_when_retry_disabled(monkeypatch):
-    """SanityCloud can fail closed instead of replaying a throttled RPC."""
+def _response_with_status(status: int) -> Mock:
+    request = httpx.Request(
+        "POST",
+        "https://notebooklm.google.com/_/LabsTailwindUi/data/batchexecute",
+    )
+    response = httpx.Response(status, request=request)
+    mocked = Mock()
+    mocked.status_code = status
+    mocked.text = ""
+    if status >= 400:
+        mocked.raise_for_status.side_effect = httpx.HTTPStatusError(
+            f"HTTP {status}",
+            request=request,
+            response=response,
+        )
+    else:
+        mocked.raise_for_status.return_value = None
+    return mocked
+
+
+def test_rate_limit_retry_limit_defaults_and_validation(monkeypatch):
+    monkeypatch.delenv("NOTEBOOKLM_RATE_LIMIT_RETRY", raising=False)
+    monkeypatch.delenv("NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES", raising=False)
+    assert _rate_limit_max_retries() == DEFAULT_MAX_RETRIES
+
+    monkeypatch.setenv("NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES", "invalid")
+    assert _rate_limit_max_retries() == DEFAULT_MAX_RETRIES
+
+    monkeypatch.setenv("NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES", "-2")
+    assert _rate_limit_max_retries() == 0
+
+
+def test_legacy_rate_limit_retry_false_forces_zero(monkeypatch):
+    """SanityCloud's legacy fail-fast switch remains compatible with upstream 0.9.8."""
     monkeypatch.setenv("NOTEBOOKLM_RATE_LIMIT_RETRY", "false")
+    monkeypatch.setenv("NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES", "5")
+    assert _rate_limit_max_retries() == 0
+
+
+def test_resource_exhausted_has_configurable_retry_ceiling(monkeypatch):
+    monkeypatch.delenv("NOTEBOOKLM_RATE_LIMIT_RETRY", raising=False)
+    monkeypatch.setenv("NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES", "1")
     client = _client()
     exhausted = [[["wrb.fr", "EXPECTED", None, None, None, [8], "generic"]]]
-    fake_resp = type(
-        "R", (), {"text": "", "status_code": 200, "raise_for_status": lambda self: None}
-    )()
+    ok = [[["wrb.fr", "EXPECTED", "[1]", None, None, None, "generic"]]]
+    response = _response_with_status(200)
+
+    with (
+        patch.object(client, "_get_client") as mock_get_client,
+        patch.object(client, "_parse_response", side_effect=[exhausted, ok]),
+        patch("time.sleep") as sleep,
+    ):
+        mock_get_client.return_value.post.return_value = response
+        result = client._call_rpc("EXPECTED", [])
+
+    assert result == [1]
+    assert mock_get_client.return_value.post.call_count == 2
+    sleep.assert_called_once()
+
+
+def test_resource_exhausted_surfaces_immediately_when_limit_is_zero(monkeypatch):
+    monkeypatch.delenv("NOTEBOOKLM_RATE_LIMIT_RETRY", raising=False)
+    monkeypatch.setenv("NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES", "0")
+    client = _client()
+    exhausted = [[["wrb.fr", "EXPECTED", None, None, None, [8], "generic"]]]
+    response = _response_with_status(200)
 
     with (
         patch.object(client, "_get_client") as mock_get_client,
         patch.object(client, "_parse_response", return_value=exhausted),
-        patch("time.sleep"),
+        patch("time.sleep") as sleep,
     ):
-        mock_get_client.return_value.post.return_value = fake_resp
+        mock_get_client.return_value.post.return_value = response
         with pytest.raises(ResourceExhaustedError):
             client._call_rpc("EXPECTED", [])
 
     assert mock_get_client.return_value.post.call_count == 1
+    sleep.assert_not_called()
 
 
-def test_call_rpc_http_429_fails_fast_when_retry_disabled(monkeypatch):
-    """HTTP rate limits surface immediately when replay is disabled."""
-    monkeypatch.setenv("NOTEBOOKLM_RATE_LIMIT_RETRY", "false")
+def test_http_429_surfaces_immediately_when_limit_is_zero(monkeypatch):
+    monkeypatch.delenv("NOTEBOOKLM_RATE_LIMIT_RETRY", raising=False)
+    monkeypatch.setenv("NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES", "0")
     client = _client()
-    request = httpx.Request(
-        "POST", "https://notebook.google.com/_/LabsTailwindUi/data/batchexecute"
-    )
-    response = httpx.Response(429, request=request)
-    exc = httpx.HTTPStatusError("Too Many Requests", request=request, response=response)
-    fake_resp = Mock()
-    fake_resp.raise_for_status.side_effect = exc
 
-    with patch.object(client, "_get_client") as mock_get_client:
-        mock_get_client.return_value.post.return_value = fake_resp
+    with (
+        patch.object(client, "_get_client") as mock_get_client,
+        patch("time.sleep") as sleep,
+    ):
+        mock_get_client.return_value.post.return_value = _response_with_status(429)
         with pytest.raises(httpx.HTTPStatusError):
             client._call_rpc("EXPECTED", [])
 
     assert mock_get_client.return_value.post.call_count == 1
+    sleep.assert_not_called()
 
 
-def test_call_rpc_via_cdp_resource_exhausted_fails_fast_when_retry_disabled(monkeypatch):
-    """CDP transport uses the same fail-fast rate-limit policy."""
-    monkeypatch.setenv("NOTEBOOKLM_RATE_LIMIT_RETRY", "false")
+def test_http_5xx_retries_are_not_disabled_by_rate_limit_policy(monkeypatch):
+    monkeypatch.delenv("NOTEBOOKLM_RATE_LIMIT_RETRY", raising=False)
+    monkeypatch.setenv("NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES", "0")
+    client = _client()
+    ok = [[["wrb.fr", "EXPECTED", "[1]", None, None, None, "generic"]]]
+
+    with (
+        patch.object(client, "_get_client") as mock_get_client,
+        patch.object(client, "_parse_response", return_value=ok),
+        patch("time.sleep") as sleep,
+    ):
+        mock_get_client.return_value.post.side_effect = [
+            _response_with_status(503),
+            _response_with_status(200),
+        ]
+        result = client._call_rpc("EXPECTED", [])
+
+    assert result == [1]
+    assert mock_get_client.return_value.post.call_count == 2
+    sleep.assert_called_once()
+
+
+def test_connect_retry_is_not_disabled_by_rate_limit_policy(monkeypatch):
+    monkeypatch.delenv("NOTEBOOKLM_RATE_LIMIT_RETRY", raising=False)
+    monkeypatch.setenv("NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES", "0")
+    client = _client()
+    ok = [[["wrb.fr", "EXPECTED", "[1]", None, None, None, "generic"]]]
+
+    with (
+        patch.object(client, "_get_client") as mock_get_client,
+        patch.object(client, "_parse_response", return_value=ok),
+        patch("time.sleep"),
+    ):
+        mock_get_client.return_value.post.side_effect = [
+            httpx.ConnectTimeout("connect timed out"),
+            _response_with_status(200),
+        ]
+        result = client._call_rpc("EXPECTED", [])
+
+    assert result == [1]
+    assert mock_get_client.return_value.post.call_count == 2
+
+
+def test_cdp_resource_exhausted_surfaces_immediately_when_limit_is_zero(monkeypatch):
+    monkeypatch.delenv("NOTEBOOKLM_RATE_LIMIT_RETRY", raising=False)
+    monkeypatch.setenv("NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES", "0")
     client = _client()
     exhausted = [[["wrb.fr", "EXPECTED", None, None, None, [8], "generic"]]]
 
     with (
         patch.object(client, "_prepare_cdp_transport"),
         patch.object(client, "_build_request_body", return_value="body"),
-        patch.object(client, "_build_url", return_value="https://notebook.google.com/rpc"),
+        patch.object(client, "_build_url", return_value="https://example.test/rpc"),
         patch.object(client, "_post_form_via_cdp", return_value="raw") as post,
         patch.object(client, "_parse_response", return_value=exhausted),
-        patch("time.sleep"),
+        patch("time.sleep") as sleep,
         pytest.raises(ResourceExhaustedError),
     ):
         client._call_rpc_via_cdp("EXPECTED", [])
 
     assert post.call_count == 1
+    sleep.assert_not_called()
+
+
+def test_legacy_retry_switch_fails_fast_for_rpc_and_http(monkeypatch):
+    """Legacy NOTEBOOKLM_RATE_LIMIT_RETRY=false must fail fast on both transports."""
+    monkeypatch.setenv("NOTEBOOKLM_RATE_LIMIT_RETRY", "false")
+    monkeypatch.delenv("NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES", raising=False)
+
+    rpc_client = _client()
+    exhausted = [[["wrb.fr", "EXPECTED", None, None, None, [8], "generic"]]]
+    with (
+        patch.object(rpc_client, "_get_client") as mock_get_client,
+        patch.object(rpc_client, "_parse_response", return_value=exhausted),
+        patch("time.sleep") as sleep,
+    ):
+        mock_get_client.return_value.post.return_value = _response_with_status(200)
+        with pytest.raises(ResourceExhaustedError):
+            rpc_client._call_rpc("EXPECTED", [])
+    assert mock_get_client.return_value.post.call_count == 1
+    sleep.assert_not_called()
+
+    http_client = _client()
+    with (
+        patch.object(http_client, "_get_client") as mock_get_client,
+        patch("time.sleep") as sleep,
+    ):
+        mock_get_client.return_value.post.return_value = _response_with_status(429)
+        with pytest.raises(httpx.HTTPStatusError):
+            http_client._call_rpc("EXPECTED", [])
+    assert mock_get_client.return_value.post.call_count == 1
+    sleep.assert_not_called()

@@ -283,24 +283,30 @@ def _claude_desktop_msix_config_path() -> Path | None:
     return package_dir / "LocalCache" / "Roaming" / "Claude" / "claude_desktop_config.json"
 
 
-def _windows_home_dir() -> Path:
-    """Resolve the Windows user home even when shell variables are unavailable."""
+def _windows_profile_dir_from_shell() -> Path | None:
+    """Resolve the current Windows profile directory through the shell API."""
     try:
-        return Path.home()
-    except RuntimeError:
         import ctypes
 
         profile = ctypes.create_unicode_buffer(260)
         # CSIDL_PROFILE (40) resolves the current user's profile directory.
         result = ctypes.windll.shell32.SHGetFolderPathW(None, 40, None, 0, profile)
-        if result == 0 and profile.value:
-            return Path(profile.value)
-        try:
-            username = os.getlogin()
-        except OSError as exc:
-            raise RuntimeError("Could not determine Windows home directory.") from exc
-        drive = os.environ.get("SYSTEMDRIVE") or "C:"
-        return Path(f"{drive}\\Users") / username
+    except (AttributeError, OSError):
+        return None
+    if result == 0 and profile.value:
+        return Path(profile.value)
+    return None
+
+
+def _windows_home_dir() -> Path:
+    """Resolve the Windows home directory even when environment variables are absent."""
+    try:
+        return Path.home()
+    except RuntimeError as exc:
+        profile_dir = _windows_profile_dir_from_shell()
+        if profile_dir is not None:
+            return profile_dir
+        raise RuntimeError("Could not determine Windows home directory.") from exc
 
 
 def _claude_desktop_candidate_paths() -> dict[str, Path]:
@@ -314,16 +320,24 @@ def _claude_desktop_candidate_paths() -> dict[str, Path]:
         }
 
     if system == "Windows":
+        appdata = os.environ.get("APPDATA")
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        home_dir = _windows_home_dir() if not appdata or not local_app_data else None
+
         regular_path = _claude_desktop_msix_config_path()
         if regular_path is None:
-            appdata = os.environ.get("APPDATA")
-            appdata_path = Path(appdata) if appdata else _windows_home_dir() / "AppData" / "Roaming"
+            if appdata:
+                appdata_path = Path(appdata)
+            else:
+                assert home_dir is not None
+                appdata_path = home_dir / "AppData" / "Roaming"
             regular_path = appdata_path / "Claude" / "claude_desktop_config.json"
 
-        local_app_data = os.environ.get("LOCALAPPDATA")
-        local_app_data_path = (
-            Path(local_app_data) if local_app_data else _windows_home_dir() / "AppData" / "Local"
-        )
+        if local_app_data:
+            local_app_data_path = Path(local_app_data)
+        else:
+            assert home_dir is not None
+            local_app_data_path = home_dir / "AppData" / "Local"
         return {
             CLAUDE_DESKTOP_PROFILE_REGULAR: regular_path,
             CLAUDE_DESKTOP_PROFILE_3P: local_app_data_path
@@ -363,13 +377,29 @@ def _claude_desktop_profile_paths() -> dict[str, Path]:
     }
 
 
+def _resolve_pwsh7_path() -> str:
+    """Resolve PowerShell 7 on Windows and refuse Windows PowerShell fallback."""
+    program_files = os.environ.get("PROGRAMFILES", r"C:\Program Files")
+    candidates = [Path(program_files) / "PowerShell" / "7" / "pwsh.exe"]
+    path_candidate = shutil.which("pwsh")
+    if path_candidate:
+        candidates.append(Path(path_candidate))
+    for candidate in candidates:
+        candidate_text = str(candidate)
+        if "windowsapps" in candidate_text.casefold():
+            continue
+        if candidate.is_file() and candidate.name.casefold() == "pwsh.exe":
+            return candidate_text
+    raise RuntimeError("PowerShell 7 (pwsh.exe) is required for Windows process inspection")
+
+
 def _claude_desktop_process_list() -> str:
     """Return the running Claude Desktop process command lines."""
     try:
         if platform.system() == "Windows":
             result = subprocess.run(
                 [
-                    "powershell",
+                    _resolve_pwsh7_path(),
                     "-NoProfile",
                     "-Command",
                     "Get-CimInstance Win32_Process -Filter \"Name='Claude.exe' OR Name='claude.exe'\" "

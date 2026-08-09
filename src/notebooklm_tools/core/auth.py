@@ -83,16 +83,16 @@ def get_cache_path() -> Path:
     return get_auth_cache_file()
 
 
-def load_cached_tokens() -> AuthTokens | None:
-    """Load tokens from cache (default profile or legacy file).
+def load_cached_tokens(profile_name: str | None = None) -> AuthTokens | None:
+    """Load tokens from a profile, with legacy fallback for the default only.
 
     Note: We no longer reject tokens based on age. The functional check
     (redirect to login during CSRF refresh) is the real validity test.
     Cookies often last much longer than any arbitrary time limit.
     """
-    # 1. Try default profile first (Unified Auth)
+    # 1. Try the requested profile first (Unified Auth)
     try:
-        manager = get_auth_manager()
+        manager = get_auth_manager(profile_name)
         if manager.profile_exists():
             profile = manager.load_profile()
             return AuthTokens(
@@ -106,7 +106,15 @@ def load_cached_tokens() -> AuthTokens | None:
                 ),
             )
     except Exception as e:
-        logger.debug(f"Failed to load default profile: {e}")
+        logger.debug(f"Failed to load auth profile: {e}")
+
+    # A named non-default profile must never inherit credentials from the
+    # single-account legacy cache.
+    if profile_name is not None:
+        from notebooklm_tools.utils.config import get_config
+
+        if profile_name != get_config().auth.default_profile:
+            return None
 
     # 2. Fallback to legacy auth cache (with auto-migration)
     cache_path = get_cache_path()
@@ -139,31 +147,29 @@ def load_cached_tokens() -> AuthTokens | None:
 def save_tokens_to_cache(
     tokens: AuthTokens,
     silent: bool = False,
-    profile: str | None = None,
+    profile_name: str | None = None,
     email: str | None = None,
 ) -> None:
-    """Save tokens to the selected profile and, when appropriate, legacy auth.json.
+    """Save tokens to a profile and mirror the configured default to auth.json.
 
-    Explicit named-profile refreshes must not overwrite the configured default
-    profile or the process-wide legacy auth cache. The legacy cache is updated
-    only when saving the configured default profile (or when no explicit
-    profile was supplied for backward compatibility).
+    Mirroring the configured default to both locations ensures the MCP server
+    and CLI read the same default credentials. Named non-default profiles stay
+    isolated in their own profile directories.
     See: https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/169
 
     Args:
         tokens: AuthTokens to save
         silent: If True, don't print confirmation message (for auto-updates)
-        profile: Optional named auth profile to update
+        profile_name: Profile to update. Uses the configured default when omitted.
         email: Optional verified account email for profile identity metadata
     """
     from notebooklm_tools.utils.config import get_config
 
     default_profile = get_config().auth.default_profile
-    target_profile = profile or default_profile
-    sync_legacy = profile is None or target_profile == default_profile
-
+    target_profile = profile_name or default_profile
     cache_path = get_cache_path()
-    if sync_legacy:
+
+    if target_profile == default_profile:
         fd = os.open(str(cache_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
             f = os.fdopen(fd, "w", encoding="utf-8")
@@ -173,26 +179,24 @@ def save_tokens_to_cache(
         with f:
             json.dump(tokens.to_dict(), f, indent=2)
 
-    # Always update the intended profile. For explicit non-default profiles,
-    # this is intentionally the only persistent write.
+    # Update only the profile that owns these credentials.
     try:
         manager = get_auth_manager(target_profile)
-        manager.save_profile(
-            cookies=tokens.cookies,
-            csrf_token=tokens.csrf_token or None,
-            session_id=tokens.session_id or None,
-            email=email,
-            build_label=tokens.build_label or None,
-            base_host=tokens.base_host or None,
-            force=True,
-        )
+        if manager.profile_exists():
+            manager.save_profile(
+                cookies=tokens.cookies,
+                csrf_token=tokens.csrf_token or None,
+                session_id=tokens.session_id or None,
+                email=email,
+                build_label=tokens.build_label or None,
+                base_host=tokens.base_host or None,
+                force=True,
+            )
     except Exception as e:
         logger.debug(f"Failed to sync tokens to profile: {e}")
 
     if not silent:
-        if sync_legacy:
-            logger.info(f"Auth tokens cached to {cache_path}")
-        logger.info(f"Auth tokens cached to profile {target_profile}")
+        logger.info(f"Auth tokens cached for profile '{target_profile}'")
 
 
 def extract_tokens_via_chrome_devtools() -> AuthTokens | None:
@@ -816,6 +820,7 @@ def check_auth(
             session_id=p.session_id or "",
             build_label=p.build_label or "",
             base_host=p.base_host or "",
+            profile_name=profile,
         )
         try:
             client.list_notebooks()

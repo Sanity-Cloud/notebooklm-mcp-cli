@@ -72,22 +72,26 @@ def check_auth(*args, **kwargs):
     return _core_auth.check_auth(*args, **kwargs)
 
 
-def load_cached_tokens():
+def load_cached_tokens(profile_name: str | None = None):
     """Re-export of `notebooklm_tools.core.auth.load_cached_tokens`."""
-    return _core_auth.load_cached_tokens()
+    if profile_name is None:
+        return _core_auth.load_cached_tokens()
+    return _core_auth.load_cached_tokens(profile_name=profile_name)
 
 
 def save_tokens_to_cache(
     tokens,
     silent: bool = False,
-    profile: str | None = None,
+    profile_name: str | None = None,
     email: str | None = None,
 ):
     """Re-export of `notebooklm_tools.core.auth.save_tokens_to_cache`."""
+    if profile_name is None and email is None:
+        return _core_auth.save_tokens_to_cache(tokens, silent=silent)
     return _core_auth.save_tokens_to_cache(
         tokens,
         silent=silent,
-        profile=profile,
+        profile_name=profile_name,
         email=email,
     )
 
@@ -373,6 +377,7 @@ class AuthHealthChecker:
                 session_id=getattr(profile, "session_id", None),
                 build_label=getattr(profile, "build_label", None),
                 base_host=getattr(profile, "base_host", None),
+                profile_name=resolved_profile,
             )
             api_latency = (time.perf_counter() - api_start) * 1000
 
@@ -453,6 +458,7 @@ class AuthHealthChecker:
         session_id: str | None = None,
         build_label: str | None = None,
         base_host: str | None = None,
+        profile_name: str | None = None,
     ) -> tuple[bool, str | None]:
         """Lightweight API probe: create a NotebookLMClient and list notebooks.
 
@@ -475,6 +481,7 @@ class AuthHealthChecker:
                 session_id=session_id or "",
                 build_label=build_label or "",
                 base_host=base_host or "",
+                profile_name=profile_name,
             ) as client:
                 client.list_notebooks()
             return True, None
@@ -601,6 +608,7 @@ def confirm_auth_via_api(profile: str | None = None) -> tuple[bool, str | None]:
             session_id=p.session_id or "",
             build_label=p.build_label or "",
             base_host=p.base_host or "",
+            profile_name=profile,
         ) as client:
             client.list_notebooks()
         return True, None

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -25,6 +26,35 @@ def _write_port_map(storage_dir: Path, data: dict) -> None:
     map_file.write_text(json.dumps(data), encoding="utf-8")
 
 
+def _install_fake_windows_process_api(monkeypatch, exit_code: int) -> None:
+    kernel32 = MagicMock()
+    kernel32.OpenProcess.return_value = 123
+
+    def get_exit_code(_handle, exit_code_pointer):
+        exit_code_pointer._obj.value = exit_code
+        return 1
+
+    kernel32.GetExitCodeProcess.side_effect = get_exit_code
+    monkeypatch.setattr(cdp.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *_args, **_kwargs: kernel32, raising=False)
+
+
+def test_read_port_map_prunes_exited_windows_process(storage_dir, monkeypatch):
+    _write_port_map(storage_dir, {"9222": {"profile": "default", "pid": 111}})
+    _install_fake_windows_process_api(monkeypatch, exit_code=0)
+
+    assert cdp._read_port_map() == {}
+    assert json.loads((storage_dir / "chrome-port-map.json").read_text(encoding="utf-8")) == {}
+
+
+def test_read_port_map_keeps_live_windows_process(storage_dir, monkeypatch):
+    entry = {"profile": "default", "pid": 111}
+    _write_port_map(storage_dir, {"9222": entry})
+    _install_fake_windows_process_api(monkeypatch, exit_code=259)
+
+    assert cdp._read_port_map() == {"9222": entry}
+
+
 def test_find_existing_nlm_chrome_reuses_only_matching_profile(storage_dir):
     _write_port_map(
         storage_dir,
@@ -39,6 +69,7 @@ def test_find_existing_nlm_chrome_reuses_only_matching_profile(storage_dir):
     }
 
     with (
+        patch.object(cdp, "_pid_is_alive", return_value=True),
         patch.object(cdp, "_fetch_cdp_version", return_value=version),
         patch.object(cdp, "_mapped_chrome_owns_profile", return_value=True),
     ):
@@ -51,11 +82,15 @@ def test_find_existing_nlm_chrome_reuses_only_matching_profile(storage_dir):
 def test_find_existing_nlm_chrome_ignores_foreign_profile_entries(storage_dir):
     _write_port_map(storage_dir, {"9222": {"profile": "work", "pid": 111}})
 
-    with patch.object(cdp, "_fetch_cdp_version") as mock_fetch:
+    # Foreign map entries are skipped; port-scan fallback must also find nothing.
+    with (
+        patch.object(cdp, "_fetch_cdp_version", return_value=None) as mock_fetch,
+        patch.object(cdp, "_listener_pid", return_value=None),
+    ):
         port, url = cdp.find_existing_nlm_chrome(profile_name="default")
 
     assert (port, url) == (None, None)
-    mock_fetch.assert_not_called()
+    assert mock_fetch.called
 
 
 def test_find_existing_nlm_chrome_clears_stale_unresponsive_port(storage_dir):
@@ -260,6 +295,7 @@ def test_terminate_profile_browsers_kills_mapped_and_orphaned_processes(
     )
     killed: list[int] = []
     monkeypatch.setattr(cdp, "_find_profile_browser_pids", lambda *_args: [333, 334])
+    monkeypatch.setattr(cdp, "_pid_is_alive", lambda _pid: True)
     monkeypatch.setattr(
         cdp,
         "_mapped_chrome_owns_profile",
@@ -323,3 +359,72 @@ def test_resolve_pwsh7_path_fails_closed_without_real_binary(tmp_path, monkeypat
 
     with pytest.raises(RuntimeError, match="PowerShell 7"):
         cdp._resolve_pwsh7_path()
+
+
+def test_find_existing_nlm_chrome_adopts_unmapped_profile_owned_browser(storage_dir):
+    """Issue #277: empty port map must still find a live profile-owned CDP listener."""
+    _write_port_map(storage_dir, {})
+    profile_dir = storage_dir / "chrome-profiles" / "default"
+    profile_dir.mkdir(parents=True)
+    version = {
+        "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/orphan",
+        "User-Agent": "Mozilla/5.0 Chrome/151",
+    }
+    cmdline = f"/usr/bin/google-chrome --remote-debugging-port=9222 --user-data-dir={profile_dir}"
+
+    with (
+        patch.object(cdp, "_fetch_cdp_version", return_value=version),
+        patch.object(cdp, "_listener_pid", return_value=4242),
+        patch.object(cdp, "_get_profile_dir_for_launch", return_value=profile_dir),
+        patch.object(cdp, "get_chrome_path", return_value="/usr/bin/google-chrome"),
+        patch.object(cdp, "_get_process_cmdline", return_value=cmdline),
+    ):
+        port, url = cdp.find_existing_nlm_chrome(profile_name="default")
+
+    assert port == 9222
+    assert url == "ws://127.0.0.1:9222/devtools/browser/orphan"
+    saved = json.loads((storage_dir / "chrome-port-map.json").read_text(encoding="utf-8"))
+    assert saved == {"9222": {"profile": "default", "pid": 4242}}
+
+
+def test_find_existing_nlm_chrome_ignores_unmapped_foreign_browser(storage_dir):
+    """Unmapped CDP listeners must not be adopted without profile ownership (#244/#277)."""
+    _write_port_map(storage_dir, {})
+    profile_dir = storage_dir / "chrome-profiles" / "default"
+    profile_dir.mkdir(parents=True)
+    version = {
+        "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/foreign",
+        "User-Agent": "Mozilla/5.0 Chrome/151",
+    }
+    foreign_cmdline = (
+        "/usr/bin/google-chrome --remote-debugging-port=9222 "
+        "--user-data-dir=/tmp/some-other-profile"
+    )
+
+    with (
+        patch.object(cdp, "_fetch_cdp_version", return_value=version),
+        patch.object(cdp, "_listener_pid", return_value=4242),
+        patch.object(cdp, "_get_profile_dir_for_launch", return_value=profile_dir),
+        patch.object(cdp, "get_chrome_path", return_value="/usr/bin/google-chrome"),
+        patch.object(cdp, "_get_process_cmdline", return_value=foreign_cmdline),
+    ):
+        port, url = cdp.find_existing_nlm_chrome(profile_name="default")
+
+    assert (port, url) == (None, None)
+    assert json.loads((storage_dir / "chrome-port-map.json").read_text(encoding="utf-8")) == {}
+
+
+def test_find_existing_nlm_chrome_ignores_unmapped_when_listener_pid_unknown(storage_dir):
+    _write_port_map(storage_dir, {})
+    version = {
+        "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/unknown",
+        "User-Agent": "Mozilla/5.0 Chrome/151",
+    }
+
+    with (
+        patch.object(cdp, "_fetch_cdp_version", return_value=version),
+        patch.object(cdp, "_listener_pid", return_value=None),
+    ):
+        port, url = cdp.find_existing_nlm_chrome(profile_name="default")
+
+    assert (port, url) == (None, None)
