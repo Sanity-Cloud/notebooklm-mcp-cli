@@ -11,6 +11,7 @@ from typing import Any, ParamSpec, TypeAlias, TypeVar, cast
 
 from notebooklm_tools.core.client import NotebookLMClient
 from notebooklm_tools.core.utils import extract_cookies_from_chrome_export
+from notebooklm_tools.mcp.diagnostics import emit_diagnostic_event
 from notebooklm_tools.services.auth import load_cached_tokens
 from notebooklm_tools.services.errors import ServiceError
 
@@ -34,14 +35,13 @@ def _sanitize_params(params: ResultDict) -> ResultDict:
     return {k: "[REDACTED]" if k in _SENSITIVE_PARAMS else v for k, v in params.items()}
 
 
-def error_result(
+def _build_error_result(
     error: str,
     *,
     hint: str | None = None,
     status: str = "error",
     **extra: Any,
 ) -> ResultDict:
-    """Build a consistent error payload for MCP tools."""
     result: ResultDict = {"status": status, "error": error}
     if hint:
         result["hint"] = hint
@@ -49,10 +49,46 @@ def error_result(
     return result
 
 
+def error_result(
+    error: str,
+    *,
+    hint: str | None = None,
+    status: str = "error",
+    **extra: Any,
+) -> ResultDict:
+    """Build a consistent error payload and emit a generic semantic failure."""
+    emit_diagnostic_event(
+        code="NOTEBOOKLM_MCP_ERROR_RESULT",
+        message=error,
+        operation="mcp_tool_result",
+        category="mcp_tool",
+        severity="warning",
+        kind="tool_error_result",
+        retryable=False,
+        details={"status": status, "hint_present": bool(hint)},
+    )
+    return _build_error_result(error, hint=hint, status=status, **extra)
+
+
 def service_error_result(error: ServiceError, *, status: str = "error") -> ResultDict:
     """Serialize a ServiceError without breaking the existing MCP error shape."""
-    result = error_result(error.user_message, hint=error.hint, status=status)
     details = error.details()
+    error_type = type(error).__name__
+    emit_diagnostic_event(
+        code=f"NOTEBOOKLM_{error_type.upper()}",
+        message=error.user_message,
+        operation="mcp_service_error",
+        category=str(error.category or "service_layer"),
+        severity="warning" if error_type in {"ValidationError", "NotFoundError"} else "error",
+        kind=error_type,
+        retryable=bool(error.retryable),
+        details={
+            "error_type": error_type,
+            "status": status,
+            **details,
+        },
+    )
+    result = _build_error_result(error.user_message, hint=error.hint, status=status)
     if details:
         result["error_details"] = details
     return result
@@ -106,6 +142,16 @@ def get_client() -> NotebookLMClient:
                         mcp_logger.info("Authentication change detected, reloading client.")
                         _client = None  # Reset directly; lock already held
             except Exception as e:
+                emit_diagnostic_event(
+                    code="NOTEBOOKLM_AUTH_STATE_CHECK_FAILED",
+                    message="NotebookLM MCP could not inspect cached authentication state for profile changes.",
+                    operation="get_client_auth_state_check",
+                    category="authentication",
+                    severity="warning",
+                    kind="suppressed_auth_check_failure",
+                    retryable=True,
+                    details={"exception_type": type(e).__name__},
+                )
                 mcp_logger.debug(f"Failed to check auth status: {e}")
 
         if _client is not None:

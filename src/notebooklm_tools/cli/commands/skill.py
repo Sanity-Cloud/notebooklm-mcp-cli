@@ -11,6 +11,7 @@ from rich.table import Table
 
 from notebooklm_tools import __version__
 from notebooklm_tools.cli.utils import is_tool_on_system, make_console
+from notebooklm_tools.utils.config import get_home_dir
 
 console = make_console()
 app = typer.Typer(
@@ -19,7 +20,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-_HOME = Path.home()
+_HOME = get_home_dir()
 
 # Shared paths: agents, gemini-cli, codex, and antigravity (project) all install here
 _AGENTS_USER = _HOME / ".agents" / "skills" / "nlm-skill"
