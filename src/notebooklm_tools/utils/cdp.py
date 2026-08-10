@@ -1017,6 +1017,11 @@ def launch_chrome_process(
     if headless:
         args.append("--headless=new")
 
+    # Open NotebookLM as part of the browser launch itself. This keeps the
+    # managed authentication window deterministic and avoids leaving users on
+    # a blank tab while the CDP login flow is waiting for the application page.
+    args.append(NOTEBOOKLM_URL)
+
     kwargs: dict[str, Any] = {
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
@@ -1666,15 +1671,23 @@ def extract_cookies_via_cdp(
 
         # Snap Chromium and some Chromium forks can take noticeably longer
         # to expose CDP than the browser window itself takes to appear.
-        # If the child already exited (Chrome handoff to an existing profile
-        # lock), stop polling the unbound port immediately (#277).
+        # On Windows, the launcher process can also exit after re-parenting to
+        # the real browser process before the DevTools listener is ready. Give
+        # an exited launcher a short bounded grace period before classifying it
+        # as the profile-lock handoff described in #277. CDP readiness remains
+        # authoritative when it appears during that grace window.
         debugger_url = None
+        launcher_exit_poll: int | None = None
+        launcher_exit_grace_polls = 5
         for attempt in range(30):
             debugger_url = get_debugger_url(port, tries=1, timeout=1)
             if debugger_url:
                 break
             if _chrome_process is not None and _chrome_process.poll() is not None:
-                break
+                if launcher_exit_poll is None:
+                    launcher_exit_poll = attempt
+                elif attempt - launcher_exit_poll >= launcher_exit_grace_polls:
+                    break
             if attempt < 29:
                 time.sleep(1)
 

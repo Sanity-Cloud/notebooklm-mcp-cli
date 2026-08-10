@@ -114,7 +114,9 @@ def test_find_or_create_notebooklm_page_ignores_accounts_continue_url(monkeypatc
     assert page["url"] == "https://notebooklm.google.com/"
 
 
-def test_find_or_create_notebooklm_page_reuses_blank_tab_before_creating_new_target(monkeypatch) -> None:
+def test_find_or_create_notebooklm_page_reuses_blank_tab_before_creating_new_target(
+    monkeypatch,
+) -> None:
     pages = [
         {
             "type": "page",
@@ -135,9 +137,7 @@ def test_find_or_create_notebooklm_page_reuses_blank_tab_before_creating_new_tar
     page = cdp.find_or_create_notebooklm_page_by_cdp_url("http://127.0.0.1:9223")
 
     assert page is pages[0]
-    assert navigated == [
-        ("ws://127.0.0.1:9223/devtools/page/blank", cdp.NOTEBOOKLM_URL)
-    ]
+    assert navigated == [("ws://127.0.0.1:9223/devtools/page/blank", cdp.NOTEBOOKLM_URL)]
 
 
 def test_extract_cookies_via_cdp_reports_chrome_handoff(monkeypatch) -> None:
@@ -169,6 +169,7 @@ def test_extract_cookies_via_cdp_reports_chrome_handoff(monkeypatch) -> None:
     monkeypatch.setattr(cdp, "find_available_port", lambda: 9222)
     monkeypatch.setattr(cdp, "launch_chrome", fake_launch_chrome)
     monkeypatch.setattr(cdp, "get_debugger_url", lambda *_a, **_k: None)
+    monkeypatch.setattr(cdp.time, "sleep", lambda *_: None)
 
     try:
         with pytest.raises(AuthenticationError) as exc_info:
@@ -177,6 +178,45 @@ def test_extract_cookies_via_cdp_reports_chrome_handoff(monkeypatch) -> None:
         error = exc_info.value
         assert "already running" in str(error.message).lower()
         assert "quit chrome" in str(error.hint).lower()
+    finally:
+        cdp._chrome_process = None
+        cdp._chrome_port = None
+
+
+def test_extract_cookies_via_cdp_accepts_debugger_after_launcher_reparents(monkeypatch) -> None:
+    """An exited Windows launcher is not a failure if its CDP port binds shortly after."""
+
+    class FakeExitedProcess:
+        stderr = None
+
+        def poll(self) -> int:
+            return 0
+
+    def fake_launch_chrome(port, profile_name="default") -> bool:
+        cdp._chrome_process = FakeExitedProcess()
+        cdp._chrome_port = port
+        return True
+
+    debugger_results = iter([None, None, "ws://127.0.0.1:9223/devtools/browser/test"])
+    monkeypatch.setattr(cdp, "_kill_stale_nlm_browsers", lambda: None)
+    monkeypatch.setattr(cdp, "find_existing_nlm_chrome", lambda **_: (None, None))
+    monkeypatch.setattr(cdp, "get_chrome_path", lambda: "/fake/chrome")
+    monkeypatch.setattr(cdp, "is_profile_locked", lambda *_a, **_k: False)
+    monkeypatch.setattr(cdp, "_get_profile_dir_for_launch", lambda *_a, **_k: "/fake/profile")
+    monkeypatch.setattr(cdp, "find_available_port", lambda: 9223)
+    monkeypatch.setattr(cdp, "launch_chrome", fake_launch_chrome)
+    monkeypatch.setattr(cdp, "get_debugger_url", lambda *_a, **_k: next(debugger_results))
+    monkeypatch.setattr(cdp.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(
+        cdp,
+        "extract_cookies_from_page",
+        lambda *_a, **_k: {"cookies": {"SID": "x"}, "csrf_token": "token"},
+    )
+
+    try:
+        result = cdp.extract_cookies_via_cdp(profile_name="default")
+        assert result["cookies"] == {"SID": "x"}
+        assert result["reused_existing"] is False
     finally:
         cdp._chrome_process = None
         cdp._chrome_port = None
