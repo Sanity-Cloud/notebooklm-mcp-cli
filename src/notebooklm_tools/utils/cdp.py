@@ -1155,7 +1155,22 @@ def close_profile_owned_cdp_browser(cdp_url: str, profile_name: str) -> bool:
                 time.sleep(0.1)
 
         if _pid_is_alive(pid):
+            # Browser.close may fail or race with browser shutdown. Re-prove
+            # listener/profile ownership immediately before any forceful kill
+            # so a recycled PID or foreign replacement can never be targeted.
+            current_pid = _listener_pid(port)
+            if current_pid != pid or not _mapped_chrome_owns_profile(
+                current_pid, profile_name, port
+            ):
+                return False
+
             _kill_process(pid)
+            for _ in range(20):
+                if not _pid_is_alive(pid):
+                    break
+                time.sleep(0.1)
+            if _pid_is_alive(pid):
+                return False
 
         _clear_port_map(port)
         return True
