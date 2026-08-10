@@ -1684,6 +1684,8 @@ def extract_cookies_via_cdp(
             if debugger_url:
                 break
             if _chrome_process is not None and _chrome_process.poll() is not None:
+                if platform.system() != "Windows":
+                    break
                 if launcher_exit_poll is None:
                     launcher_exit_poll = attempt
                 elif attempt - launcher_exit_poll >= launcher_exit_grace_polls:
