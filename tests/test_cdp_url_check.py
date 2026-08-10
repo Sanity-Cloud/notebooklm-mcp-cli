@@ -198,6 +198,7 @@ def test_extract_cookies_via_cdp_accepts_debugger_after_launcher_reparents(monke
         return True
 
     debugger_results = iter([None, None, "ws://127.0.0.1:9223/devtools/browser/test"])
+    monkeypatch.setattr(cdp.platform, "system", lambda: "Windows")
     monkeypatch.setattr(cdp, "_kill_stale_nlm_browsers", lambda: None)
     monkeypatch.setattr(cdp, "find_existing_nlm_chrome", lambda **_: (None, None))
     monkeypatch.setattr(cdp, "get_chrome_path", lambda: "/fake/chrome")
@@ -217,6 +218,49 @@ def test_extract_cookies_via_cdp_accepts_debugger_after_launcher_reparents(monke
         result = cdp.extract_cookies_via_cdp(profile_name="default")
         assert result["cookies"] == {"SID": "x"}
         assert result["reused_existing"] is False
+    finally:
+        cdp._chrome_process = None
+        cdp._chrome_port = None
+
+
+def test_extract_cookies_via_cdp_keeps_immediate_launcher_exit_failure_off_windows(
+    monkeypatch,
+) -> None:
+    """The Windows re-parent grace must not weaken #277 behavior on other platforms."""
+
+    class FakeExitedProcess:
+        stderr = None
+
+        def poll(self) -> int:
+            return 0
+
+    calls = 0
+
+    def fake_launch_chrome(port, profile_name="default") -> bool:
+        cdp._chrome_process = FakeExitedProcess()
+        cdp._chrome_port = port
+        return True
+
+    def fake_get_debugger_url(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return None
+
+    monkeypatch.setattr(cdp.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(cdp, "_kill_stale_nlm_browsers", lambda: None)
+    monkeypatch.setattr(cdp, "find_existing_nlm_chrome", lambda **_: (None, None))
+    monkeypatch.setattr(cdp, "get_chrome_path", lambda: "/fake/chrome")
+    monkeypatch.setattr(cdp, "is_profile_locked", lambda *_a, **_k: False)
+    monkeypatch.setattr(cdp, "_get_profile_dir_for_launch", lambda *_a, **_k: "/fake/profile")
+    monkeypatch.setattr(cdp, "find_available_port", lambda: 9223)
+    monkeypatch.setattr(cdp, "launch_chrome", fake_launch_chrome)
+    monkeypatch.setattr(cdp, "get_debugger_url", fake_get_debugger_url)
+    monkeypatch.setattr(cdp.time, "sleep", lambda *_: None)
+
+    try:
+        with pytest.raises(cdp.AuthenticationError):
+            cdp.extract_cookies_via_cdp(profile_name="default")
+        assert calls == 1
     finally:
         cdp._chrome_process = None
         cdp._chrome_port = None
