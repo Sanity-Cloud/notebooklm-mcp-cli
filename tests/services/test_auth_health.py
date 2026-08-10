@@ -325,6 +325,32 @@ def _enterable_client_mock(MockClient):
 
 
 class TestCredentialsAreUsable:
+    def test_explicit_profile_routes_to_profile_scoped_checker(self, monkeypatch):
+        seen: dict[str, str | None] = {}
+        report = AuthHealthReport(
+            valid=True,
+            status="configured",
+            probes=[],
+            profile="harmonywave13",
+            checked_at=0.0,
+        )
+
+        def fake_get_checker(profile=None):
+            seen["profile"] = profile
+            return type("C", (), {"check": lambda self, **kw: report})()
+
+        monkeypatch.setattr(
+            "notebooklm_tools.services.auth.get_auth_health_checker",
+            fake_get_checker,
+        )
+        from notebooklm_tools.services.auth import credentials_are_usable
+
+        usable, status, detail = credentials_are_usable(profile="harmonywave13")
+        assert usable is True
+        assert status == "configured"
+        assert detail is None
+        assert seen["profile"] == "harmonywave13"
+
     def test_returns_configured_when_health_checker_passes(self, monkeypatch):
         report = AuthHealthReport(
             valid=True,
@@ -335,7 +361,7 @@ class TestCredentialsAreUsable:
         )
         monkeypatch.setattr(
             "notebooklm_tools.services.auth.get_auth_health_checker",
-            lambda: type("C", (), {"check": lambda self, **kw: report})(),
+            lambda profile=None: type("C", (), {"check": lambda self, **kw: report})(),
         )
         usable, status, detail = __import__(
             "notebooklm_tools.services.auth", fromlist=["credentials_are_usable"]
@@ -354,7 +380,7 @@ class TestCredentialsAreUsable:
         )
         monkeypatch.setattr(
             "notebooklm_tools.services.auth.get_auth_health_checker",
-            lambda: type("C", (), {"check": lambda self, **kw: report})(),
+            lambda profile=None: type("C", (), {"check": lambda self, **kw: report})(),
         )
         monkeypatch.setattr(
             "notebooklm_tools.services.auth.confirm_auth_via_api",
@@ -554,6 +580,13 @@ class TestSingleton:
 
     def test_singleton_is_auth_health_checker(self):
         assert isinstance(get_auth_health_checker(), AuthHealthChecker)
+
+    def test_explicit_profiles_receive_independent_cached_checkers(self):
+        pte = get_auth_health_checker(profile="pte")
+        harmony = get_auth_health_checker(profile="harmonywave13")
+        assert pte is get_auth_health_checker(profile="pte")
+        assert harmony is get_auth_health_checker(profile="harmonywave13")
+        assert pte is not harmony
 
 
 # ---------------------------------------------------------------------------

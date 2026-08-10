@@ -262,6 +262,43 @@ def test_get_process_cmdline_reads_linux_proc():
     assert "python" in cmdline.lower()
 
 
+def test_get_process_cmdline_windows_retries_one_cim_timeout(monkeypatch):
+    expected = (
+        '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" '
+        '--remote-debugging-port=9223 '
+        '--user-data-dir="C:\\Users\\harmo\\.notebooklm-mcp-cli\\chrome-profiles\\pte"'
+    )
+    completed = MagicMock(returncode=0, stdout=expected + "\n")
+    run = MagicMock(
+        side_effect=[
+            cdp.subprocess.TimeoutExpired(cmd="pwsh", timeout=10),
+            completed,
+        ]
+    )
+    monkeypatch.setattr(cdp.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(cdp, "_resolve_pwsh7_path", lambda: r"C:\Program Files\PowerShell\7\pwsh.exe")
+    monkeypatch.setattr(cdp.subprocess, "run", run)
+
+    assert cdp._get_process_cmdline(730712) == expected
+    assert run.call_count == 2
+
+
+def test_listener_pid_windows_retries_one_network_query_timeout(monkeypatch):
+    completed = MagicMock(returncode=0, stdout="730712\n")
+    run = MagicMock(
+        side_effect=[
+            cdp.subprocess.TimeoutExpired(cmd="pwsh", timeout=10),
+            completed,
+        ]
+    )
+    monkeypatch.setattr(cdp.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(cdp, "_resolve_pwsh7_path", lambda: r"C:\Program Files\PowerShell\7\pwsh.exe")
+    monkeypatch.setattr(cdp.subprocess, "run", run)
+
+    assert cdp._listener_pid(9223) == 730712
+    assert run.call_count == 2
+
+
 def test_find_profile_browser_pids_matches_only_exact_profile(tmp_path, monkeypatch):
     target_dir = tmp_path / "harmonywave13"
     foreign_dir = tmp_path / "harmonywave13-other"

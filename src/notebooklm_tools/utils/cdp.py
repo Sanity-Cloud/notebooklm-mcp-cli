@@ -75,7 +75,7 @@ def _normalize_ws_url(url: str | None) -> str | None:
 
 
 from notebooklm_tools.core.exceptions import AuthenticationError  # noqa: E402
-from notebooklm_tools.utils.config import get_base_url  # noqa: E402
+from notebooklm_tools.utils.config import get_base_url, get_home_dir  # noqa: E402
 
 __all__ = [
     "get_chrome_path",
@@ -311,7 +311,7 @@ def find_available_port(starting_from: int = 9222, max_attempts: int = 10) -> in
 
 # macOS: absolute .app bundle paths, /Applications first then ~/Applications
 def _macos_browser_candidates() -> list[tuple[str, str]]:
-    home_apps = Path.home() / "Applications"
+    home_apps = get_home_dir() / "Applications"
     entries: list[tuple[str, str]] = [
         ("Google Chrome", "Google Chrome.app/Contents/MacOS/Google Chrome"),
         ("Arc", "Arc.app/Contents/MacOS/Arc"),
@@ -348,8 +348,9 @@ _LINUX_BROWSER_CANDIDATES: list[tuple[str, str]] = [
 
 # Windows: absolute paths.  User-local installs live under %LOCALAPPDATA%.
 def _windows_browser_candidates() -> list[tuple[str, str]]:
-    local = Path.home() / "AppData" / "Local"
-    roaming = Path.home() / "AppData" / "Roaming"
+    home = get_home_dir()
+    local = home / "AppData" / "Local"
+    roaming = home / "AppData" / "Roaming"
     pf = Path(r"C:\Program Files")
     pf86 = Path(r"C:\Program Files (x86)")
     return [
@@ -534,16 +535,16 @@ def get_snap_common_dir(browser_path: str) -> Path | None:
             if part == "snap" and index + 1 < len(parts):
                 snap_name = parts[index + 1]
                 if snap_name in ("chromium", "google-chrome", "firefox"):
-                    return Path.home() / "snap" / snap_name / "common"
+                    return get_home_dir() / "snap" / snap_name / "common"
         for part in parts:
             if part in ("chromium", "google-chrome", "firefox"):
-                return Path.home() / "snap" / part / "common"
+                return get_home_dir() / "snap" / part / "common"
     except (OSError, RuntimeError):
         pass
 
     # Fallback: try common snap names
     for snap_name in ("chromium", "google-chrome"):
-        snap_common = Path.home() / "snap" / snap_name / "common"
+        snap_common = get_home_dir() / "snap" / snap_name / "common"
         if snap_common.exists():
             return snap_common
 
@@ -611,23 +612,34 @@ def _get_process_cmdline(pid: int) -> str | None:
         except Exception:
             return None
     if system == "Windows":
-        try:
-            result = subprocess.run(
-                [
-                    _resolve_pwsh7_path(),
-                    "-NoProfile",
-                    "-Command",
-                    f'(Get-CimInstance Win32_Process -Filter "ProcessId={pid}").CommandLine',
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
+        command = [
+            _resolve_pwsh7_path(),
+            "-NoProfile",
+            "-Command",
+            f'(Get-CimInstance Win32_Process -Filter "ProcessId={pid}").CommandLine',
+        ]
+        # Win32_Process/CIM can exceed the first 10-second budget while the
+        # provider is cold, even though an immediate retry succeeds.  Profile
+        # ownership is a fail-closed security boundary, so retry only the
+        # timeout case once; all other failures remain unverifiable.
+        for attempt in range(2):
+            try:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                if attempt == 0:
+                    continue
+                return None
+            except Exception:
+                return None
             if result.returncode == 0:
                 cmd = result.stdout.strip()
                 return cmd if cmd else None
-        except Exception:
             return None
     return None
 
@@ -782,14 +794,15 @@ def _mapped_chrome_owns_profile(pid: int | None, profile_name: str, port: int) -
         return False
 
     normalized_cmdline = cmdline.replace("\\", "/")
-    profile_path = str(profile_dir).replace("\\", "/")
     debug_port = _get_cmdline_flag_value(normalized_cmdline, "--remote-debugging-port")
     user_data_dir = _get_cmdline_flag_value(normalized_cmdline, "--user-data-dir")
 
     if debug_port != str(port):
         return False
 
-    return user_data_dir == profile_path
+    return user_data_dir is not None and _normalize_profile_path(user_data_dir) == _normalize_profile_path(
+        profile_dir
+    )
 
 
 def _listener_pid(port: int) -> int | None:
@@ -797,26 +810,33 @@ def _listener_pid(port: int) -> int | None:
     system = platform.system()
     try:
         if system == "Windows":
-            result = subprocess.run(
-                [
-                    _resolve_pwsh7_path(),
-                    "-NoProfile",
-                    "-Command",
-                    (
-                        f"(Get-NetTCPConnection -LocalPort {int(port)} -State Listen "
-                        "-ErrorAction SilentlyContinue | Select-Object -First 1 "
-                        "-ExpandProperty OwningProcess)"
-                    ),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
-            if result.returncode == 0:
-                text = result.stdout.strip()
-                return int(text) if text.isdigit() else None
-            return None
+            command = [
+                _resolve_pwsh7_path(),
+                "-NoProfile",
+                "-Command",
+                (
+                    f"(Get-NetTCPConnection -LocalPort {int(port)} -State Listen "
+                    "-ErrorAction SilentlyContinue | Select-Object -First 1 "
+                    "-ExpandProperty OwningProcess)"
+                ),
+            ]
+            for attempt in range(2):
+                try:
+                    result = subprocess.run(
+                        command,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired:
+                    if attempt == 0:
+                        continue
+                    return None
+                if result.returncode == 0:
+                    text = result.stdout.strip()
+                    return int(text) if text.isdigit() else None
+                return None
 
         # macOS/Linux: prefer lsof; fall back to fuser on Linux.
         for cmd in (
