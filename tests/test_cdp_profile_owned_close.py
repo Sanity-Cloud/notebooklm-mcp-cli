@@ -15,7 +15,9 @@ def test_close_profile_owned_cdp_browser_closes_exact_managed_profile(monkeypatc
             "webSocketDebuggerUrl": "ws://127.0.0.1:9227/devtools/browser/managed"
         },
     )
-    monkeypatch.setattr(cdp, "execute_cdp_command", lambda url, command: closed.append((url, command)))
+    monkeypatch.setattr(
+        cdp, "execute_cdp_command", lambda url, command: closed.append((url, command))
+    )
     monkeypatch.setattr(cdp, "_pid_is_alive", lambda _pid: next(alive))
     monkeypatch.setattr(cdp, "_clear_port_map", cleared.append)
     monkeypatch.setattr(cdp.time, "sleep", lambda _seconds: None)
@@ -31,7 +33,9 @@ def test_close_profile_owned_cdp_browser_leaves_foreign_browser_running(monkeypa
     monkeypatch.setattr(
         cdp,
         "execute_cdp_command",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("foreign browser must not close")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("foreign browser must not close")
+        ),
     )
 
     assert cdp.close_profile_owned_cdp_browser("http://127.0.0.1:9227", "harmonywave13") is False
@@ -41,7 +45,9 @@ def test_close_profile_owned_cdp_browser_rejects_remote_endpoint(monkeypatch):
     monkeypatch.setattr(
         cdp,
         "_listener_pid",
-        lambda _port: (_ for _ in ()).throw(AssertionError("remote endpoint must not be inspected")),
+        lambda _port: (_ for _ in ()).throw(
+            AssertionError("remote endpoint must not be inspected")
+        ),
     )
 
     assert cdp.close_profile_owned_cdp_browser("http://192.0.2.10:9227", "harmonywave13") is False
