@@ -206,6 +206,23 @@ class TestBrowserDetection:
             "No user-local (AppData) entries found in Windows candidate list"
         )
 
+    def test_windows_candidates_use_configured_storage_when_home_is_unavailable(
+        self, monkeypatch, tmp_path
+    ):
+        """Service runtimes without HOME/USERPROFILE still resolve browser paths."""
+        from notebooklm_tools.utils.cdp import _windows_browser_candidates
+
+        expected_home = tmp_path / "profile"
+        storage_dir = expected_home / ".notebooklm-mcp-cli"
+        monkeypatch.delenv("USERPROFILE", raising=False)
+        monkeypatch.delenv("HOME", raising=False)
+        monkeypatch.setenv("NOTEBOOKLM_MCP_CLI_PATH", str(storage_dir))
+
+        with patch("pathlib.Path.home", side_effect=RuntimeError("Could not determine home directory.")):
+            paths = [path for _, path in _windows_browser_candidates()]
+
+        assert any(str(expected_home / "AppData" / "Local") in path for path in paths)
+
 
 class TestCDPStartupHandling:
     """Tests for CDP startup timing and diagnostics."""
