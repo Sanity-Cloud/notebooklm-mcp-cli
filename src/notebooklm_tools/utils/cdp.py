@@ -83,6 +83,7 @@ __all__ = [
     "get_supported_browsers",
     "extract_cookies_via_cdp",
     "extract_cookies_via_existing_cdp",
+    "close_profile_owned_cdp_browser",
     "run_headless_auth",
     "has_chrome_profile",
     "terminate_chrome",
@@ -1016,6 +1017,13 @@ def launch_chrome_process(
     if headless:
         args.append("--headless=new")
 
+    # Open NotebookLM as part of the browser launch itself. Previously the
+    # login flow launched a blank/new-tab window and relied on a later CDP
+    # navigation step. If Chrome handed the launch off before CDP became
+    # reachable, the user was left looking at a blank tab even though the
+    # correct managed profile had been selected.
+    args.append(NOTEBOOKLM_URL)
+
     kwargs: dict[str, Any] = {
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
@@ -1103,6 +1111,61 @@ def terminate_chrome(process: subprocess.Popen | None = None, port: int | None =
         _chrome_process = None
         _chrome_port = None
     return True
+
+
+def close_profile_owned_cdp_browser(cdp_url: str, profile_name: str) -> bool:
+    """Close an external-CDP browser only when it owns ``profile_name``.
+
+    External CDP is normally treated as caller-owned and left running. A
+    recovery flow may instead launch the CLI's dedicated per-profile Chrome
+    user-data-dir and attach through external CDP. In that case, release the
+    managed profile lock after successful authentication just like builtin
+    login does.
+
+    Ownership is proved fail-closed from a loopback listener PID, exact CDP
+    port, and exact ``--user-data-dir`` for the requested NotebookLM profile.
+    Foreign browsers, remote CDP endpoints, and unverifiable processes are
+    never closed.
+    """
+    try:
+        http_url = normalize_cdp_http_url(cdp_url)
+        parsed = urlparse(http_url)
+        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+            return False
+        if parsed.port is None:
+            return False
+
+        port = parsed.port
+        pid = _listener_pid(port)
+        if pid is None or not _mapped_chrome_owns_profile(pid, profile_name, port):
+            return False
+
+        version_info = _fetch_cdp_version(port, timeout=1)
+        debugger_url = (
+            _normalize_ws_url(version_info.get("webSocketDebuggerUrl")) if version_info else None
+        )
+
+        if debugger_url:
+            # Browser.close commonly tears down the transport before the
+            # response is observed. Verify exit below before a forceful
+            # fallback.
+            with contextlib.suppress(Exception):
+                execute_cdp_command(debugger_url, "Browser.close")
+
+            for _ in range(20):
+                if not _pid_is_alive(pid):
+                    break
+                time.sleep(0.1)
+
+        if _pid_is_alive(pid):
+            _kill_process(pid)
+
+        _clear_port_map(port)
+        return True
+    except Exception:
+        # Failure to prove ownership must never widen into a generic browser
+        # kill.
+        return False
 
 
 def _fetch_cdp_version(port: int, *, timeout: int = 5) -> dict | None:
@@ -1611,14 +1674,14 @@ def extract_cookies_via_cdp(
 
         # Snap Chromium and some Chromium forks can take noticeably longer
         # to expose CDP than the browser window itself takes to appear.
-        # If the child already exited (Chrome handoff to an existing profile
-        # lock), stop polling the unbound port immediately (#277).
+        # Do NOT treat the launcher process exiting as proof that startup
+        # failed. On Windows, chrome.exe can re-parent/hand off to the actual
+        # browser process before the DevTools listener binds. The debugging
+        # endpoint is the authoritative readiness signal.
         debugger_url = None
         for attempt in range(30):
             debugger_url = get_debugger_url(port, tries=1, timeout=1)
             if debugger_url:
-                break
-            if _chrome_process is not None and _chrome_process.poll() is not None:
                 break
             if attempt < 29:
                 time.sleep(1)
