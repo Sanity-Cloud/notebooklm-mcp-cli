@@ -1017,6 +1017,11 @@ def launch_chrome_process(
     if headless:
         args.append("--headless=new")
 
+    # Open NotebookLM as part of the browser launch itself. This keeps the
+    # managed authentication window deterministic and avoids leaving users on
+    # a blank tab while the CDP login flow is waiting for the application page.
+    args.append(NOTEBOOKLM_URL)
+
     kwargs: dict[str, Any] = {
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,

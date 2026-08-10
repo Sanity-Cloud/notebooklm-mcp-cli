@@ -114,7 +114,9 @@ def test_find_or_create_notebooklm_page_ignores_accounts_continue_url(monkeypatc
     assert page["url"] == "https://notebooklm.google.com/"
 
 
-def test_find_or_create_notebooklm_page_reuses_blank_tab_before_creating_new_target(monkeypatch) -> None:
+def test_find_or_create_notebooklm_page_reuses_blank_tab_before_creating_new_target(
+    monkeypatch,
+) -> None:
     pages = [
         {
             "type": "page",
@@ -135,9 +137,7 @@ def test_find_or_create_notebooklm_page_reuses_blank_tab_before_creating_new_tar
     page = cdp.find_or_create_notebooklm_page_by_cdp_url("http://127.0.0.1:9223")
 
     assert page is pages[0]
-    assert navigated == [
-        ("ws://127.0.0.1:9223/devtools/page/blank", cdp.NOTEBOOKLM_URL)
-    ]
+    assert navigated == [("ws://127.0.0.1:9223/devtools/page/blank", cdp.NOTEBOOKLM_URL)]
 
 
 def test_extract_cookies_via_cdp_reports_chrome_handoff(monkeypatch) -> None:
