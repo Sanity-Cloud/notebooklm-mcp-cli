@@ -21,9 +21,10 @@ from ._utils import (
 async def notebook_query(
     notebook_id: str,
     query: str,
-    source_ids: list[str] | None = None,
+    source_ids: str | list[str] | None = None,
     conversation_id: str | None = None,
     timeout: float | None = None,
+    new_conversation: bool = False,
 ) -> ResultDict:
     """Ask AI about EXISTING sources already in notebook. NOT for finding new sources.
 
@@ -34,7 +35,8 @@ async def notebook_query(
         query: Question to ask
         source_ids: Source IDs to query (default: all)
         conversation_id: For follow-up questions
-        timeout: Request timeout in seconds (default: from env NOTEBOOKLM_QUERY_TIMEOUT or 120.0)
+        timeout: Wall-clock query budget in seconds (default: from env NOTEBOOKLM_QUERY_TIMEOUT or 120.0; source-heavy notebooks may need 180+)
+        new_conversation: Start a fresh conversation when conversation_id is omitted
     """
     try:
         client = get_client()
@@ -50,6 +52,7 @@ async def notebook_query(
                 source_ids=coerced_source_ids,
                 conversation_id=conversation_id,
                 timeout=effective_timeout,
+                new_conversation=new_conversation,
             ),
             abandon_on_cancel=True,
         )
@@ -95,15 +98,17 @@ def chat_configure(
 def notebook_query_start(
     notebook_id: str,
     query: str,
-    source_ids: list[str] | None = None,
+    source_ids: str | list[str] | None = None,
     conversation_id: str | None = None,
     timeout: float | None = None,
+    new_conversation: bool = False,
 ) -> ResultDict:
-    """Start a notebook query asynchronously for large notebooks that may timeout.
+    """Start a notebook query asynchronously for source-heavy notebooks or long questions.
 
-    Use this instead of notebook_query when querying notebooks with many sources
-    (50+) where the response may take longer than 60 seconds. Returns immediately
-    with a query_id. Poll notebook_query_status with the query_id to get the result.
+    Use this instead of notebook_query when the response may take longer than the
+    default 120-second budget. A timeout around 180 seconds is a useful starting
+    point for source-heavy notebooks. Returns immediately with a query_id. Poll
+    notebook_query_status with the query_id to get the result.
 
     Workflow: notebook_query_start -> poll notebook_query_status until completed.
 
@@ -112,7 +117,8 @@ def notebook_query_start(
         query: Question to ask
         source_ids: Source IDs to query (default: all)
         conversation_id: For follow-up questions
-        timeout: Request timeout in seconds (default: from env NOTEBOOKLM_QUERY_TIMEOUT or 120.0)
+        timeout: Wall-clock query budget in seconds (default: from env NOTEBOOKLM_QUERY_TIMEOUT or 120.0; source-heavy notebooks may need 180+)
+        new_conversation: Start a fresh conversation when conversation_id is omitted
     """
     try:
         client = get_client()
@@ -125,6 +131,7 @@ def notebook_query_start(
             source_ids=coerced_source_ids,
             conversation_id=conversation_id,
             timeout=effective_timeout,
+            new_conversation=new_conversation,
         )
         return {"status": "success", **result}
     except ServiceError as e:

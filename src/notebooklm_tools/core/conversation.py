@@ -8,6 +8,7 @@ and conversation-related operations.
 import json
 import logging
 import os
+import time
 import urllib.parse
 from typing import Any, Protocol, cast
 
@@ -18,6 +19,8 @@ from .data_types import ConversationTurn
 from .errors import NotebookLMError
 
 logger = logging.getLogger("notebooklm_mcp.api")
+
+DEFAULT_QUERY_TIMEOUT = 120.0
 
 GOOGLE_ERROR_CODES = {
     1: "CANCELLED",
@@ -49,7 +52,7 @@ class QueryRejectedError(NotebookLMError):
 
 
 class _NotebookLookupProtocol(Protocol):
-    def get_notebook(self, notebook_id: str) -> Any: ...
+    def get_notebook(self, notebook_id: str, timeout: float | None = None) -> Any: ...
 
 
 class ConversationMixin(BaseClient):
@@ -197,7 +200,7 @@ class ConversationMixin(BaseClient):
             "max_chars_per_turn": self._max_chars_per_turn,
         }
 
-    def get_conversation_id(self, notebook_id: str) -> str | None:
+    def get_conversation_id(self, notebook_id: str, timeout: float | None = None) -> str | None:
         """Fetch the persistent conversation ID for a notebook from the server.
 
         NotebookLM assigns each notebook a persistent conversation ID that tracks
@@ -211,10 +214,12 @@ class ConversationMixin(BaseClient):
             The conversation UUID string if one exists, or None for new notebooks.
         """
         try:
+            kwargs = {"timeout": timeout} if timeout is not None else {}
             result = self._call_rpc(
                 self.RPC_GET_CONVERSATIONS,
                 [[], None, notebook_id, 20],
                 path=f"/notebook/{notebook_id}",
+                **kwargs,
             )
         except Exception:
             # Non-critical: fall back to generating a new UUID
@@ -353,7 +358,8 @@ class ConversationMixin(BaseClient):
         query_text: str,
         source_ids: list[str] | None = None,
         conversation_id: str | None = None,
-        timeout: float = 120.0,
+        timeout: float | None = DEFAULT_QUERY_TIMEOUT,
+        new_conversation: bool = False,
     ) -> dict[str, Any] | None:
         """Query the notebook with a question.
 
@@ -365,9 +371,12 @@ class ConversationMixin(BaseClient):
             query_text: The question to ask
             source_ids: Optional list of source IDs to query (default: all sources)
             conversation_id: Optional conversation ID for follow-up questions.
-                           If None, starts a new conversation.
+                           If None, reuses the notebook's persistent server
+                           conversation when one exists.
                            If provided and exists in cache, includes conversation history.
-            timeout: Request timeout in seconds (default: 120.0)
+            timeout: Wall-clock query budget in seconds (default: 120.0)
+            new_conversation: If True and conversation_id is omitted, always
+                              starts a fresh conversation with a generated UUID.
 
         Returns:
             Dict with:
@@ -382,25 +391,39 @@ class ConversationMixin(BaseClient):
         """
         import uuid
 
+        deadline = time.monotonic() + timeout if timeout is not None else None
+
+        def remaining_timeout() -> float | None:
+            if deadline is None:
+                return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise _httpx.ReadTimeout("The query deadline expired before the next request")
+            return remaining
+
         # If no source_ids provided, get them from the notebook
         if source_ids is None:
             notebook_client = cast(_NotebookLookupProtocol, self)
-            notebook_data = notebook_client.get_notebook(notebook_id)
+            notebook_data = notebook_client.get_notebook(notebook_id, timeout=remaining_timeout())
             source_ids = self._extract_source_ids_from_notebook(notebook_data)
 
         # Determine if this is a new conversation or follow-up
         is_new_conversation = conversation_id is None
         if is_new_conversation:
-            # Try to get the persistent conversation ID from the server first.
-            # This is what makes CLI/MCP chats appear in the web UI's chat history.
-            server_conv_id = self.get_conversation_id(notebook_id)
-            if server_conv_id:
-                conversation_id = server_conv_id
-                # Build history from local cache if we have it
-                conversation_history = self._build_conversation_history(conversation_id)
-            else:
+            if new_conversation:
                 conversation_id = str(uuid.uuid4())
                 conversation_history = None
+            else:
+                # Try to get the persistent conversation ID from the server first.
+                # This is what makes CLI/MCP chats appear in the web UI's chat history.
+                server_conv_id = self.get_conversation_id(notebook_id, timeout=remaining_timeout())
+                if server_conv_id:
+                    conversation_id = server_conv_id
+                    # Build history from local cache if we have it
+                    conversation_history = self._build_conversation_history(conversation_id)
+                else:
+                    conversation_id = str(uuid.uuid4())
+                    conversation_history = None
         else:
             # Check if we have cached history for this conversation
             assert conversation_id is not None
@@ -408,8 +431,10 @@ class ConversationMixin(BaseClient):
 
         assert conversation_id is not None
 
+        request_timeout = remaining_timeout()
+
         if self._cdp_rpc_transport_enabled():
-            self._prepare_cdp_transport(timeout)
+            self._prepare_cdp_transport(request_timeout)
 
         # Build source IDs structure: [[[sid]]] for each source (3 brackets, not 4!)
         sources_array = [[[sid]] for sid in source_ids] if source_ids else []
@@ -458,9 +483,9 @@ class ConversationMixin(BaseClient):
         # form-encoded payloads without an explicit Content-Type header.
         headers = {"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"}
         if self._cdp_rpc_transport_enabled():
-            response_text = self._post_form_via_cdp(url, body, timeout)
+            response_text = self._post_form_via_cdp(url, body, request_timeout)
         else:
-            with _httpx.Client(timeout=timeout, cookies=cookies, headers=headers) as client:
+            with _httpx.Client(timeout=request_timeout, cookies=cookies, headers=headers) as client:
                 response = client.post(url, content=body)
                 response.raise_for_status()
                 response_text = response.text

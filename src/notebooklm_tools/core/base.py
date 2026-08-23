@@ -26,7 +26,7 @@ from notebooklm_tools.utils.config import get_base_url
 from . import constants
 from .data_types import ConversationTurn
 from .errors import ClientAuthenticationError as AuthenticationError
-from .errors import ResourceExhaustedError, RPCDriftError, RPCError
+from .errors import ResourceExhaustedError, RPCDriftError, RPCError, TransientBackendError
 from .retry import (
     DEFAULT_BASE_DELAY,
     DEFAULT_MAX_DELAY,
@@ -161,6 +161,39 @@ def _extract_user_message(detail_data: Any, _depth: int = 0) -> str:
 # Timeout configuration (seconds)
 DEFAULT_TIMEOUT = 30.0  # Default for most operations
 SOURCE_ADD_TIMEOUT = 120.0  # Extended timeout for all source operations
+
+
+def _is_unreachable_failure(exc: Exception | None) -> bool:
+    """Return whether a refresh failure indicates an unreachable backend.
+
+    A failed homepage refresh can mean either that credentials were rejected
+    or that the request never reached a usable NotebookLM backend. Only the
+    former should result in an authentication-expired message.
+    """
+    if exc is None:
+        return False
+    if isinstance(exc, (httpx.TransportError, httpx.TimeoutException, OSError)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+
+    text = str(exc).lower()
+    if "accounts.google.com" in text or "authentication expired" in text or "expired" in text:
+        return False
+    if re.search(r"\b5\d{2}\b", text):
+        return True
+    return any(
+        marker in text
+        for marker in (
+            "could not reach",
+            "network",
+            "timed out",
+            "timeout",
+            "connection",
+            "temporarily unavailable",
+            "dns",
+        )
+    )
 
 
 class BaseClient:
@@ -799,7 +832,7 @@ class BaseClient:
 
         context = get_cdp_page_context(
             profile_name=self._profile_name,
-            timeout=timeout or DEFAULT_TIMEOUT,
+            timeout=timeout if timeout is not None else DEFAULT_TIMEOUT,
             csrf_fallback=csrf_fallback,
             session_fallback=session_fallback,
             build_fallback=build_fallback,
@@ -820,14 +853,19 @@ class BaseClient:
             ws_url = self._cdp_ws_url
 
         if not ws_url:
-            self._prepare_cdp_transport(timeout or DEFAULT_TIMEOUT)
+            self._prepare_cdp_transport(timeout if timeout is not None else DEFAULT_TIMEOUT)
             with self._state_lock:
                 ws_url = self._cdp_ws_url
 
         if not ws_url:
             raise CdpTransportError("CDP transport was enabled, but no page websocket was found.")
 
-        result = fetch_form_in_page(ws_url, url, body, timeout=timeout or DEFAULT_TIMEOUT)
+        result = fetch_form_in_page(
+            ws_url,
+            url,
+            body,
+            timeout=timeout if timeout is not None else DEFAULT_TIMEOUT,
+        )
         if result.status_code in (400, 401, 403):
             raise AuthenticationError(f"CDP fetch returned HTTP {result.status_code}.")
         if result.status_code >= 400:
@@ -843,10 +881,14 @@ class BaseClient:
         _server_retry: int = 0,
     ) -> Any:
         """Execute a batchexecute RPC through the experimental CDP transport."""
-        self._prepare_cdp_transport(timeout or DEFAULT_TIMEOUT)
+        self._prepare_cdp_transport(timeout if timeout is not None else DEFAULT_TIMEOUT)
         body = self._build_request_body(rpc_id, params)
         url = self._build_url(rpc_id, path)
-        response_text = self._post_form_via_cdp(url, body, timeout or DEFAULT_TIMEOUT)
+        response_text = self._post_form_via_cdp(
+            url,
+            body,
+            timeout if timeout is not None else DEFAULT_TIMEOUT,
+        )
 
         parsed = self._parse_response(response_text)
         try:
@@ -1072,8 +1114,20 @@ class BaseClient:
                 with self._state_lock:
                     self._client = None
                 return self._call_rpc(rpc_id, params, path, timeout, _retry=True)
-            except ValueError:
-                # CSRF refresh failed (cookies expired) - continue to layer 2
+            except (ValueError, httpx.HTTPError, OSError) as exc:
+                # A transport or 5xx failure is not evidence that credentials
+                # expired. Retrying auth would produce the wrong user guidance
+                # and may launch a needless interactive login.
+                if _is_unreachable_failure(exc):
+                    raise TransientBackendError(
+                        "Could not reach NotebookLM while verifying the session.",
+                        hint=(
+                            "Check your connection and retry; your saved credentials may still "
+                            "be valid."
+                        ),
+                    ) from exc
+                # A redirect to accounts.google.com or an explicit expiry
+                # message remains a genuine authentication failure.
                 pass
 
         # Layer 2 & 3: Reload from disk or run headless auth (deep retry)

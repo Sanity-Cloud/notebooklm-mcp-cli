@@ -1,6 +1,6 @@
 ---
 name: nlm-skill
-version: "0.9.8"
+version: "0.9.14"
 description: "Expert guide for the Gemini Notebook (formerly Google NotebookLM) CLI (`nlm`) and MCP server - interfaces for Gemini Notebook. Use this skill when users want to interact with Gemini Notebook programmatically, including: creating/managing notebooks, adding sources (URLs, YouTube, text, Google Drive), generating content (podcasts, reports, quizzes, flashcards, mind maps, slides, infographics, videos, data tables), conducting research, chatting with sources, or automating Gemini Notebook workflows. Triggers on mentions of \"nlm\", \"notebooklm\", \"Gemini Notebook\", \"podcast generation\", \"audio overview\", \"refactor document\", \"critique draft\", or any Gemini Notebook-related automation task."
 ---
 
@@ -153,7 +153,7 @@ nlm login profile delete <name>     # Delete a profile
 nlm login profile rename <old> <new> # Rename a profile
 ```
 
-**Multi-Profile Support**: Each profile gets its own isolated browser session (supports Chrome, Arc, Brave, Edge, Chromium, and more), so you can be logged into multiple Google accounts simultaneously.
+**Multi-Profile Support**: Each profile gets its own isolated browser session (supports Chrome, Arc, Brave, Edge, Chromium, Firefox, and more), so you can be logged into multiple Google accounts simultaneously.
 
 **Auth status:** `configured` means usable; `stale` means run `nlm login`;
 `not_configured` means first-time setup is required; `unverified` means the
@@ -172,8 +172,14 @@ Use `notebook_list`, `notebook_create`, `notebook_get`, `notebook_describe`,
 get/describe/query/rename/delete tools require `notebook_id`; list and create
 do not. Delete requires `confirm=True`.
 
-For large notebooks or long-running questions, call `notebook_query_start`,
-then poll `notebook_query_status(query_id)` until completed or errored.
+Queries use a 120-second wall-clock budget by default. Source-heavy notebooks
+or long-running questions may need a larger budget, for example
+`timeout=180`. For those queries, call `notebook_query_start`, then poll
+`notebook_query_status(query_id)` until completed or errored.
+
+By default, `notebook_query` continues the notebook's persistent chat when
+`conversation_id` is omitted. For an independent question, pass
+`new_conversation=True` (or use `--new-conversation` with the CLI).
 
 #### CLI Commands
 ```bash
@@ -185,6 +191,7 @@ nlm notebook create "Title" --json     # Stable machine-readable ID capture
 nlm notebook get <id>                  # Get notebook details
 nlm notebook describe <id>             # AI-generated summary + suggested topics
 nlm notebook query <id> "question"     # One-shot Q&A with sources
+nlm notebook query <id> "question" --new-conversation  # Start a fresh chat
 nlm notebook rename <id> "New Title"   # Rename notebook
 nlm notebook delete <id> --confirm     # PERMANENT deletion
 ```
@@ -643,7 +650,7 @@ nlm login switch work                        # Switch default profile
 | `output.format` | `table` | Default output format (table, json) |
 | `output.color` | `true` | Enable colored output |
 | `output.short_ids` | `true` | Show shortened IDs |
-| `auth.browser` | `auto` | Preferred browser for login (auto, chrome, arc, brave, edge, chromium, vivaldi, opera) |
+| `auth.browser` | `auto` | Preferred browser for login (auto, chrome, arc, brave, edge, chromium, firefox, vivaldi, opera) |
 | `auth.default_profile` | `default` | Profile to use when `--profile` not specified |
 
 ### Diagnostics & Setup

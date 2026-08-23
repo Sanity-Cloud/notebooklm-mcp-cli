@@ -95,9 +95,16 @@ source_add(
 | Tool | Description |
 |------|-------------|
 | `notebook_query` | Ask AI about sources in notebook |
-| `notebook_query_start` | Start a query asynchronously for large notebooks that may time out |
+| `notebook_query_start` | Start a query asynchronously for source-heavy notebooks or long-running questions |
 | `notebook_query_status` | Poll an async query started with `notebook_query_start` |
 | `chat_configure` | Set chat goal and response length |
+
+Queries use a 120-second wall-clock budget by default. Source-heavy notebooks
+can take longer than that; retry with `timeout=180` (or another value suited
+to the notebook). For longer operations, use `notebook_query_start` and poll
+`notebook_query_status` until it reports `completed` or `error`. A timeout
+returns a structured error with a retry hint rather than an uninformative
+transport failure.
 
 ### Chat Sessions (3 tools)
 
@@ -351,7 +358,7 @@ pipeline(action="run", notebook_id="abc", pipeline_name="ingest-and-podcast", in
 | `NOTEBOOKLM_MCP_DEBUG` | Enable debug logging |
 | `NOTEBOOKLM_HL` | Interface language and default artifact locale, including regional BCP-47 values such as `es-419` (default: en) |
 | `NOTEBOOKLM_QUERY_TIMEOUT` | Query timeout (seconds) |
-| `NOTEBOOKLM_BASE_URL` | Override base URL for Enterprise/Workspace (default: `https://notebook.google.com`) |
+| `NOTEBOOKLM_BASE_URL` | Override base URL for Enterprise/Workspace (default: `https://notebooklm.google.com`) |
 | `NOTEBOOKLM_DOWNLOAD_DIR` | Optional directory boundary for artifact downloads. Unset preserves the default behavior. |
 | `NOTEBOOKLM_ALLOWED_FILE_DIRS` | Optional OS-separated list of directories allowed for local file sources. Unset means unrestricted. |
 | `NOTEBOOKLM_DISABLED_GROUPS` | Comma-separated tool groups to hide (see [Selective tool exposure](#selective-tool-exposure)) |

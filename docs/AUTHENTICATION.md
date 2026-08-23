@@ -11,14 +11,20 @@ This guide explains how to authenticate with Gemini Notebook (formerly Google No
 
 Gemini Notebook uses browser cookies for authentication (there is no official API). The CLI/MCP extracts these cookies automatically from a managed browser session:
 - Chromium-family browsers use Chrome DevTools Protocol (CDP)
+- Firefox uses an isolated profile and reads its cookie store directly (no CDP or WebDriver required)
 
-**Supported browsers**: Google Chrome, Arc (macOS), Brave, Microsoft Edge, Chromium, Vivaldi, Opera.
+**Supported browsers**: Google Chrome, Arc (macOS), Brave, Microsoft Edge, Chromium, Firefox, Vivaldi, Opera.
+
+On Windows, standalone Chromium is discovered in the standard machine-wide
+locations under `C:\Program Files` and `C:\Program Files (x86)`, plus the
+per-user `%LOCALAPPDATA%\Chromium\Application\chrome.exe` location. You can
+select it explicitly with `nlm config set auth.browser chromium`.
 
 **Two authentication methods are available:**
 
 | Method | Best For | Requires |
 |--------|----------|----------|
-| **Auto Mode** (default) | Most users | Any supported Chromium-family browser installed |
+| **Auto Mode** (default) | Most users | Any supported browser installed |
 | **File Mode** (`--file`) | Complex setups, troubleshooting | Manual cookie extraction |
 
 ---
@@ -29,7 +35,7 @@ This method launches your browser automatically and extracts cookies after you l
 
 ### Prerequisites
 
-- A supported browser installed (Chrome, Arc, Brave, Edge, Chromium, Vivaldi, or Opera)
+- A supported browser installed (Chrome, Arc, Brave, Edge, Chromium, Firefox, Vivaldi, or Opera)
 - Chromium-family browsers should be **completely closed** before running
 
 ### Steps
@@ -57,8 +63,10 @@ nlm login --devtools-timeout 15
 2. A dedicated browser profile is created for authentication
 3. The browser launches with the appropriate automation backend
 4. You log in to Gemini Notebook via the browser
-5. Cookies, CSRF token, and account email are extracted and cached
+5. Cookies are extracted and cached; CSRF/session fields are refreshed automatically when needed
 6. The browser is closed automatically
+
+When Firefox is selected, the profile is isolated under the NLM storage directory and its cookie database is read directly. Because cookie extraction cannot prove which Google account is active, re-login against an existing saved profile requires explicit `nlm login --force` after you confirm the account.
 
 ### Browser Preference
 
@@ -71,7 +79,7 @@ nlm config set auth.browser brave
 # Or use an environment variable
 export NLM_BROWSER=arc
 
-# Valid values: auto, chrome, arc, brave, edge, chromium, vivaldi, opera
+# Valid values: auto, chrome, arc, brave, edge, chromium, firefox, vivaldi, opera
 # If the preferred browser is not installed, falls back to auto-detection.
 ```
 
@@ -136,7 +144,7 @@ export NOTEBOOKLM_BASE_URL=https://notebooklm.cloud.google.com
 nlm login
 ```
 
-All CLI commands, MCP tools, and internal API calls will use this URL automatically. If the variable is not set, the default personal URL (`https://notebook.google.com`) is used.
+All CLI commands, MCP tools, and internal API calls will use this URL automatically. If the variable is not set, the default personal URL (`https://notebooklm.google.com`) is used.
 
 > **Tip:** Add the export to your shell profile (`~/.zshrc`, `~/.bashrc`) so it persists across sessions.
 
@@ -159,13 +167,13 @@ For MCP server configuration, pass the variable in your client config:
 
 ## The "Gemini Notebook" rebrand (`notebook.google.com`)
 
-Google is rolling out a rebrand of Gemini Notebook that redirects some signed-in accounts to `notebook.google.com` instead of `notebook.google.com`. This is handled automatically as of v0.9.3: `nlm login` records whichever host your account actually lands on (per-profile, in `metadata.json`), and every CLI/MCP request is routed to that host afterward. No configuration is needed.
+Google is rolling out a rebrand of Gemini Notebook that redirects some signed-in accounts to `notebook.google.com` instead of `notebooklm.google.com`. This is handled automatically: `nlm login` records whichever host accepts your account (per-profile, in `metadata.json`), and every CLI/MCP request is routed to that host afterward. No configuration is needed for personal accounts.
 
 Resolution order, if you need to override it manually:
 
 1. `NOTEBOOKLM_BASE_URL` env var, if set (see Enterprise section above).
 2. The host your account last signed in on (auto-detected).
-3. The default `https://notebook.google.com`.
+3. The default `https://notebooklm.google.com`.
 
 ---
 
@@ -184,6 +192,14 @@ nlm login --manual
 
 # Option B: Direct file path
 nlm login --manual --file /path/to/cookies.txt
+```
+
+File mode verifies the imported cookies before saving them. For personal accounts, it checks both `notebooklm.google.com` and the rebranded `notebook.google.com`, then stores the host that accepts the session. Managed Workspace accounts should set `NOTEBOOKLM_BASE_URL` as described above.
+
+To force the rebranded personal host explicitly:
+
+```bash
+NOTEBOOKLM_BASE_URL=https://notebook.google.com nlm login --manual --file /path/to/cookies.txt
 ```
 
 ### How to Extract Cookies Manually
@@ -212,6 +228,7 @@ SID=abc123...; HSID=xyz789...; SSID=...; APISID=...; SAPISID=...; __Secure-1PSID
 - Lines starting with `#` are treated as comments and ignored
 - The file can contain the cookie string on one or multiple lines
 - A template file `cookies.txt` is included in the repository
+- Cookie files are static credentials. Re-export them when the live verification reports that they were rejected.
 
 ---
 

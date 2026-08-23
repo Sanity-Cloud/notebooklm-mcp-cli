@@ -265,7 +265,7 @@ def test_get_process_cmdline_reads_linux_proc():
 def test_get_process_cmdline_windows_retries_one_cim_timeout(monkeypatch):
     expected = (
         '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" '
-        '--remote-debugging-port=9223 '
+        "--remote-debugging-port=9223 "
         '--user-data-dir="C:\\Users\\harmo\\.notebooklm-mcp-cli\\chrome-profiles\\pte"'
     )
     completed = MagicMock(returncode=0, stdout=expected + "\n")
@@ -276,7 +276,9 @@ def test_get_process_cmdline_windows_retries_one_cim_timeout(monkeypatch):
         ]
     )
     monkeypatch.setattr(cdp.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(cdp, "_resolve_pwsh7_path", lambda: r"C:\Program Files\PowerShell\7\pwsh.exe")
+    monkeypatch.setattr(
+        cdp, "_resolve_pwsh7_path", lambda: r"C:\Program Files\PowerShell\7\pwsh.exe"
+    )
     monkeypatch.setattr(cdp.subprocess, "run", run)
 
     assert cdp._get_process_cmdline(730712) == expected
@@ -292,7 +294,9 @@ def test_listener_pid_windows_retries_one_network_query_timeout(monkeypatch):
         ]
     )
     monkeypatch.setattr(cdp.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(cdp, "_resolve_pwsh7_path", lambda: r"C:\Program Files\PowerShell\7\pwsh.exe")
+    monkeypatch.setattr(
+        cdp, "_resolve_pwsh7_path", lambda: r"C:\Program Files\PowerShell\7\pwsh.exe"
+    )
     monkeypatch.setattr(cdp.subprocess, "run", run)
 
     assert cdp._listener_pid(9223) == 730712
@@ -370,6 +374,7 @@ def test_clear_profile_directory_terminates_browser_before_delete(tmp_path, monk
 
     assert events == ["terminate", "remove"]
     assert not profile_dir.exists()
+
 
 def test_resolve_pwsh7_path_prefers_real_program_files_binary(tmp_path, monkeypatch):
     program_files = tmp_path / "Program Files"

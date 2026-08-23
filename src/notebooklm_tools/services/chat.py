@@ -4,10 +4,12 @@ import logging
 import threading
 import time
 import uuid
-from typing import Any, cast
+from typing import Any
+
+import httpx
 
 from ..core.client import NotebookLMClient
-from ..core.conversation import QueryRejectedError
+from ..core.conversation import DEFAULT_QUERY_TIMEOUT, QueryRejectedError
 from . import notebooks as notebook_service
 from ._compat import TypedDict
 from .errors import ServiceError, ValidationError
@@ -17,6 +19,20 @@ logger = logging.getLogger(__name__)
 VALID_GOALS = ("default", "learning_guide", "custom")
 VALID_RESPONSE_LENGTHS = ("default", "longer", "shorter")
 MAX_PROMPT_LENGTH = 10_000
+
+
+class _QueryBudget:
+    """Track the wall-clock budget for one query operation."""
+
+    def __init__(self, timeout: float | None):
+        effective_timeout = DEFAULT_QUERY_TIMEOUT if timeout is None else timeout
+        self._deadline = time.monotonic() + effective_timeout
+
+    def remaining(self) -> float:
+        remaining = self._deadline - time.monotonic()
+        if remaining <= 0:
+            raise httpx.ReadTimeout("The query deadline expired before the next request")
+        return remaining
 
 
 _QUERY_REJECTION_METADATA: dict[int, dict[str, str | bool]] = {
@@ -89,6 +105,57 @@ def _query_rejected_service_error(error: QueryRejectedError) -> ServiceError:
     )
 
 
+def _query_timeout_service_error(error: Exception) -> ServiceError:
+    """Map transport timeouts to actionable query metadata."""
+    return ServiceError(
+        f"Query timed out: {error}",
+        user_message="NotebookLM did not respond within the configured query timeout.",
+        hint="Retry with a longer timeout, such as 180 seconds.",
+        debug_code="query_deadline_exceeded",
+        category="deadline_exceeded",
+        retryable=True,
+        suggested_action="retry_with_longer_timeout",
+    )
+
+
+def _resolve_query_source_ids(
+    client: NotebookLMClient,
+    notebook_id: str,
+    source_ids: list[str] | None,
+    budget: _QueryBudget,
+) -> list[str] | None:
+    """Validate a whole-notebook query and reuse its source IDs."""
+    if source_ids:
+        return source_ids
+
+    try:
+        notebook = notebook_service.get_notebook(
+            client,
+            notebook_id,
+            timeout=budget.remaining(),
+        )
+        if notebook["source_count"] == 0:
+            raise ValidationError(
+                "Cannot query an empty notebook.",
+                user_message="This notebook has no sources to query. Add a source first using 'nlm source add' or 'nlm research start'.",
+            )
+
+        resolved_source_ids = [
+            source["id"]
+            for source in notebook.get("sources", [])
+            if isinstance(source, dict) and source.get("id")
+        ]
+        return resolved_source_ids or None
+    except ValidationError:
+        raise
+    except httpx.TimeoutException:
+        raise
+    except Exception:
+        # Preserve the existing fallback: let the core client try to resolve
+        # sources when the optional validation lookup fails.
+        return source_ids
+
+
 class QueryResult(TypedDict):
     """Result of a notebook query."""
 
@@ -132,6 +199,7 @@ def query(
     source_ids: list[str] | None = None,
     conversation_id: str | None = None,
     timeout: float | None = None,
+    new_conversation: bool = False,
 ) -> QueryResult:
     """Query a notebook's sources with AI.
 
@@ -141,7 +209,8 @@ def query(
         query_text: Question to ask
         source_ids: Source IDs to query (default: all)
         conversation_id: For follow-up questions
-        timeout: Request timeout in seconds
+        timeout: Wall-clock query budget in seconds (default: 120.0)
+        new_conversation: Start a fresh conversation when conversation_id is omitted
 
     Returns:
         QueryResult with answer, conversation_id, and sources_used
@@ -156,37 +225,45 @@ def query(
             user_message="Please provide a question to ask.",
         )
 
-    # Validate notebook has sources
-    if not source_ids:
-        # We only check if we target the whole notebook
-        try:
-            nb = notebook_service.get_notebook(client, notebook_id)
-            if nb["source_count"] == 0:
-                raise ValidationError(
-                    "Cannot query an empty notebook.",
-                    user_message="This notebook has no sources to query. Add a source first using 'nlm source add' or 'nlm research start'.",
-                )
-        except ValidationError:
-            raise
-        except Exception:
-            pass  # Suppress failure to fetch notebook details; let query try anyway
-
+    budget = _QueryBudget(timeout)
     try:
+        resolved_source_ids = _resolve_query_source_ids(
+            client,
+            notebook_id,
+            source_ids,
+            budget,
+        )
+        query_options = {}
+        if new_conversation:
+            query_options["new_conversation"] = True
+
         result = client.query(
             notebook_id=notebook_id,
             query_text=query_text,
-            source_ids=source_ids,
+            source_ids=resolved_source_ids,
             conversation_id=conversation_id,
-            **({"timeout": cast(float, timeout)} if timeout is not None else {}),
+            timeout=budget.remaining(),
+            **query_options,
         )
     except QueryRejectedError as e:
         raise _query_rejected_service_error(e) from e
+    except ValidationError:
+        raise
+    except httpx.TimeoutException as e:
+        raise _query_timeout_service_error(e) from e
     except Exception as e:
         raise ServiceError(f"Query failed: {e}") from e
 
     if result:
+        answer = result.get("answer")
+        if not isinstance(answer, str) or not answer.strip():
+            raise ServiceError(
+                "Query returned empty answer",
+                user_message="The notebook returned no answer. Please retry the query.",
+            )
+
         return {
-            "answer": result.get("answer", ""),
+            "answer": answer,
             "question": query_text,
             "conversation_id": result.get("conversation_id"),
             "sources_used": result.get("sources_used", []),
@@ -355,6 +432,7 @@ def _run_query_in_background(
     source_ids: list[str] | None,
     conversation_id: str | None,
     timeout: float | None,
+    new_conversation: bool,
 ) -> None:
     """Background thread target that executes the query and stores the result."""
     try:
@@ -365,6 +443,7 @@ def _run_query_in_background(
             source_ids=source_ids,
             conversation_id=conversation_id,
             timeout=timeout,
+            new_conversation=new_conversation,
         )
         with _pending_lock:
             if query_id in _pending_queries:
@@ -388,6 +467,7 @@ def query_start(
     source_ids: list[str] | None = None,
     conversation_id: str | None = None,
     timeout: float | None = None,
+    new_conversation: bool = False,
 ) -> QueryStartResult:
     """Start a notebook query in a background thread for async polling.
 
@@ -401,7 +481,8 @@ def query_start(
         query_text: Question to ask
         source_ids: Source IDs to query (default: all)
         conversation_id: For follow-up questions
-        timeout: Request timeout in seconds
+        timeout: Wall-clock query budget in seconds (default: 120.0)
+        new_conversation: Start a fresh conversation when conversation_id is omitted
 
     Returns:
         QueryStartResult with query_id and initial status
@@ -415,19 +496,17 @@ def query_start(
             user_message="Please provide a question to ask.",
         )
 
-    # Validate notebook has sources
-    if not source_ids:
-        try:
-            nb = notebook_service.get_notebook(client, notebook_id)
-            if nb["source_count"] == 0:
-                raise ValidationError(
-                    "Cannot query an empty notebook.",
-                    user_message="This notebook has no sources to query. Add a source first using 'nlm source add' or 'nlm research start'.",
-                )
-        except ValidationError:
-            raise
-        except Exception:
-            pass
+    budget = _QueryBudget(timeout)
+    try:
+        resolved_source_ids = _resolve_query_source_ids(
+            client,
+            notebook_id,
+            source_ids,
+            budget,
+        )
+        worker_timeout = budget.remaining()
+    except httpx.TimeoutException as e:
+        raise _query_timeout_service_error(e) from e
 
     query_id = uuid.uuid4().hex[:12]
 
@@ -443,7 +522,16 @@ def query_start(
 
     thread = threading.Thread(
         target=_run_query_in_background,
-        args=(query_id, client, notebook_id, query_text, source_ids, conversation_id, timeout),
+        args=(
+            query_id,
+            client,
+            notebook_id,
+            query_text,
+            resolved_source_ids,
+            conversation_id,
+            worker_timeout,
+            new_conversation,
+        ),
         daemon=True,
     )
     thread.start()
@@ -468,6 +556,7 @@ def query_status(query_id: str) -> QueryStatusResult:
         ValidationError: If query_id is not found
     """
     with _pending_lock:
+        _cleanup_expired_queries()
         entry = _pending_queries.get(query_id)
         if entry is None:
             raise ValidationError(
@@ -486,9 +575,5 @@ def query_status(query_id: str) -> QueryStatusResult:
             "error": entry["error"],
             "error_details": entry["error_details"],
         }
-
-        # Clean up completed/errored entries after reading
-        if entry["status"] in ("completed", "error"):
-            del _pending_queries[query_id]
 
         return result

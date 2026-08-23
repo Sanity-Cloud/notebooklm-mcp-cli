@@ -2,7 +2,7 @@
 """Tests for ConversationMixin."""
 
 import json
-from unittest.mock import ANY, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -97,6 +97,17 @@ class TestGetConversationId:
             mixin.RPC_GET_CONVERSATIONS,
             [[], None, "nb-123", 20],
             path="/notebook/nb-123",
+        )
+
+    def test_passes_timeout_to_rpc(self):
+        mixin = self._make_mixin()
+        with patch.object(mixin, "_call_rpc", return_value=None) as mock_rpc:
+            mixin.get_conversation_id("nb-123", timeout=12.5)
+        mock_rpc.assert_called_once_with(
+            mixin.RPC_GET_CONVERSATIONS,
+            [[], None, "nb-123", 20],
+            path="/notebook/nb-123",
+            timeout=12.5,
         )
 
 
@@ -248,11 +259,15 @@ class TestQueryUsesServerConversationId:
 
             result = mixin.query("nb-123", "Hello?", source_ids=["src-1"])
 
-        mock_client_class.assert_called_once_with(
-            timeout=120.0,
-            cookies=ANY,
-            headers={"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"},
-        )
+        request_client_calls = [
+            call.kwargs for call in mock_client_class.call_args_list if "cookies" in call.kwargs
+        ]
+        assert len(request_client_calls) == 1
+        assert 0 < request_client_calls[0]["timeout"] <= 120.0
+        assert request_client_calls[0]["cookies"]
+        assert request_client_calls[0]["headers"] == {
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+        }
         assert result["conversation_id"] == "server-conv-id"
 
     def test_falls_back_to_uuid_when_no_server_id(self):
@@ -279,6 +294,63 @@ class TestQueryUsesServerConversationId:
         # Should be a valid UUID (36 chars with hyphens)
         assert result["conversation_id"] != "server-conv-id"
         assert len(result["conversation_id"]) == 36
+
+    def test_new_conversation_skips_server_conversation_lookup(self):
+        """Explicit fresh conversations do not reuse the server conversation."""
+        mixin = self._make_mixin()
+        with (
+            patch.object(mixin, "get_conversation_id", side_effect=AssertionError),
+            patch("notebooklm_tools.core.conversation._httpx.Client") as mock_client_class,
+        ):
+            mock_response = mock_client_class.return_value.__enter__.return_value.post.return_value
+            mock_response.text = ")]}'\n100\n" + json.dumps(
+                [
+                    [
+                        "wrb.fr",
+                        None,
+                        json.dumps([["A fresh answer.", None, [], None, [1]]]),
+                    ]
+                ]
+            )
+            mock_response.raise_for_status = lambda: None
+
+            result = mixin.query(
+                "nb-123",
+                "Hello?",
+                source_ids=["src-1"],
+                new_conversation=True,
+            )
+
+        assert result["conversation_id"] != "server-conv-id"
+        assert len(result["conversation_id"]) == 36
+
+    def test_query_passes_timeout_to_internal_lookups(self):
+        mixin = self._make_mixin()
+        with (
+            patch.object(
+                mixin,
+                "get_notebook",
+                return_value=[["Notebook", [[["src-1"], "Source"]], "nb-123"]],
+                create=True,
+            ) as mock_get_notebook,
+            patch.object(mixin, "get_conversation_id", return_value=None) as mock_get_conversation,
+            patch("notebooklm_tools.core.conversation.time.monotonic", return_value=100.0),
+            patch("notebooklm_tools.core.conversation._httpx.Client") as mock_client_class,
+        ):
+            mock_response = mock_client_class.return_value.__enter__.return_value.post.return_value
+            mock_response.text = ")]}'\n100\n" + json.dumps(
+                [["wrb.fr", None, json.dumps([["An answer.", None, [], None, [1]]])]]
+            )
+            mock_response.raise_for_status = lambda: None
+
+            mixin.query("nb-123", "Hello?", timeout=45.0)
+
+        mock_get_notebook.assert_called_once_with("nb-123", timeout=45.0)
+        mock_get_conversation.assert_called_once_with("nb-123", timeout=45.0)
+        request_client_calls = [
+            call.kwargs for call in mock_client_class.call_args_list if "cookies" in call.kwargs
+        ]
+        assert request_client_calls[0]["timeout"] == 45.0
 
 
 class TestConversationMixinMethods:

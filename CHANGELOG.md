@@ -18,6 +18,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Named-profile identity persistence** — headless refresh retains the selected profile and verified account email, and profile rename keeps the associated managed browser profile aligned with the auth profile.
+## [0.9.14] - 2026-08-20
+
+### Added
+
+- **Native NotebookLM collections (#303)** — Manage collections through the CLI and MCP server, including create, list, edit, delete, and emoji operations. Thanks to **@rodrigopazTech** for the contribution.
+- **Windows standalone Chromium authentication (#302)** — Browser discovery now includes Chromium in standard machine-wide and per-user Windows installation locations. Thanks to **@zaidLMS** for the request.
+
+### Fixed
+
+- **Source-heavy query timeouts (#298)** — Query timeouts now govern the full wall-clock operation, including notebook and conversation lookups, and synchronous and asynchronous paths expose structured, retryable timeout errors. The default is 120 seconds, with documentation recommending a longer value such as 180 seconds for source-heavy notebooks. Thanks to **@doc-parihar** for the detailed reproduction and diagnostics.
+
+### Verification
+
+- Full test suite, Ruff lint, formatting, package build, and version-alignment checks passed.
+
+## [0.9.13] - 2026-08-19
+
+### Fixed
+
+- **Transient backend/auth distinction ([PR #300](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/300), [PR #301](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/301))** — Transport errors, timeouts, DNS failures, and HTTP 5xx responses during authentication refresh now surface as transient backend or network errors, while explicit session expiry and Google authentication redirects remain authentication failures. Thanks to **@practical-tools-lab** for the original reproduction and transport-classification work in PR #300.
+- **README star-history chart ([PR #299](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/299))** — The chart now uses a public mirror that does not require GitHub stargazer API permissions. Thanks to **@CrustyMozarella** for the mirror fix.
+
+### Verification
+
+- Full non-E2E test suite: 1,424 passed, 38 skipped, 1 deselected.
+- Ruff lint and formatting checks passed.
+
+## [0.9.12] - 2026-08-17
+
+### Added
+- **Explicit fresh conversations (#297)** — Query callers can pass `new_conversation=True`, or use the CLI's `--new-conversation` flag, to skip the notebook's persistent chat lookup and start with a generated conversation ID. Existing defaults continue persistent web-UI chat behavior.
+
+### Fixed
+- **Empty query answers (#297)** — Empty, whitespace-only, or missing answer text now produces a structured service error instead of a successful result with no content.
+- **REPL conversation clearing** — `/clear` now starts a genuinely fresh conversation instead of reusing the notebook's persistent server conversation.
+
+### Verification
+- Full test suite: 1,415 passed, 39 skipped.
+- Ruff lint and formatting checks passed.
+- Live CLI query with `--new-conversation` returned a cited answer and a distinct conversation ID from the notebook's existing active session.
+
+## [0.9.11] - 2026-08-12
+
+### Added
+- **Firefox managed-browser authentication (#294, PR #295)** — `nlm login` can use an isolated Firefox profile when Chromium/CDP is unavailable, while retaining Chromium-family browsers as the default when they are available.
+
+### Fixed
+- **Safe Firefox profile replacement** — Firefox cookie extraction cannot identify the Google account, so an existing saved profile now requires explicit `nlm login --force` before its credentials can be replaced.
+- **Serialized MCP list parameters (#296)** — MCP tools that already normalize list values now accept JSON-string and comma-separated inputs at the FastMCP boundary, including notebook queries, source operations, Studio, and research import.
+
+### Thanks
+- Thanks to **@LucasMazei** for PR #295 and the Firefox authentication fallback.
+- Thanks to **@GuanHukd** for the detailed reproduction and call-site inventory in issue #296.
+
+## [0.9.10] - 2026-08-11
+
+### Fixed
+- **Manual login host detection (#292)** — `nlm login --manual` now verifies imported cookies against the configured Gemini Notebook host and, for personal accounts, the rebranded `notebook.google.com` host. It persists the host that accepts the session instead of leaving `base_host` empty and incorrectly routing later API calls to the legacy host. Rejected or unverifiable cookies no longer produce a false authentication success. Thanks to **@afonsoft** for the detailed headless reproduction and root-cause follow-up!
+
+## [0.9.9] - 2026-08-11
+
+### Fixed
+- **Windows CDP handoff safety (#289)** — Late CDP listeners are accepted only after their process is verified to own the requested profile, with a bounded grace period for legitimate browser handoff. Thanks to **@insane66613** for the PR.
+- **Home resolution in constrained environments (#288)** — Browser discovery, Snap profile routing, and migration paths now share resilient fallbacks when `Path.home()` is unavailable, honoring the explicit storage location first. Thanks to **@insane66613** for the PR.
+- **WSL non-ASCII Windows paths (#287)** — PowerShell and `wslpath` output now use explicit UTF-8 handling so Windows user/profile paths are preserved across the WSL boundary. Reported by **@etadward**.
+- **Async query result retention (#286)** — Completed and failed query results remain readable until their normal TTL instead of disappearing after the first status request. Reported by **@Joystick01**.
+- **Profile-owned CDP cleanup (#290)** — Externally managed local browsers are closed only after ownership checks, and replacement listeners never have their port mappings cleared. Thanks to **@insane66613** for the PR.
 
 ## [0.9.8] - 2026-08-08
 

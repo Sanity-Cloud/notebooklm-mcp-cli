@@ -348,15 +348,18 @@ _LINUX_BROWSER_CANDIDATES: list[tuple[str, str]] = [
 
 # Windows: absolute paths.  User-local installs live under %LOCALAPPDATA%.
 def _windows_browser_candidates() -> list[tuple[str, str]]:
-    home = get_home_dir()
-    local = home / "AppData" / "Local"
-    roaming = home / "AppData" / "Roaming"
+    home_dir = get_home_dir()
+    local = home_dir / "AppData" / "Local"
+    roaming = home_dir / "AppData" / "Roaming"
     pf = Path(r"C:\Program Files")
     pf86 = Path(r"C:\Program Files (x86)")
     return [
         ("Google Chrome", str(pf / r"Google\Chrome\Application\chrome.exe")),
         ("Google Chrome", str(pf86 / r"Google\Chrome\Application\chrome.exe")),
         ("Google Chrome", str(local / r"Google\Chrome\Application\chrome.exe")),
+        ("Chromium", str(pf / r"Chromium\Application\chrome.exe")),
+        ("Chromium", str(pf86 / r"Chromium\Application\chrome.exe")),
+        ("Chromium", str(local / r"Chromium\Application\chrome.exe")),
         ("Microsoft Edge", str(pf86 / r"Microsoft\Edge\Application\msedge.exe")),
         ("Microsoft Edge", str(pf / r"Microsoft\Edge\Application\msedge.exe")),
         ("Microsoft Edge", str(local / r"Microsoft\Edge\Application\msedge.exe")),
@@ -800,9 +803,9 @@ def _mapped_chrome_owns_profile(pid: int | None, profile_name: str, port: int) -
     if debug_port != str(port):
         return False
 
-    return user_data_dir is not None and _normalize_profile_path(user_data_dir) == _normalize_profile_path(
-        profile_dir
-    )
+    return user_data_dir is not None and _normalize_profile_path(
+        user_data_dir
+    ) == _normalize_profile_path(profile_dir)
 
 
 def _listener_pid(port: int) -> int | None:
@@ -858,6 +861,12 @@ def _listener_pid(port: int) -> int | None:
     except Exception:
         return None
     return None
+
+
+def _profile_owned_cdp_listener(port: int, profile_name: str) -> bool:
+    """Return whether the local CDP listener belongs to the requested profile."""
+    pid = _listener_pid(port)
+    return pid is not None and _mapped_chrome_owns_profile(pid, profile_name, port)
 
 
 def find_existing_nlm_chrome(
@@ -1131,23 +1140,22 @@ def terminate_chrome(process: subprocess.Popen | None = None, port: int | None =
     return True
 
 
-def close_profile_owned_cdp_browser(cdp_url: str, profile_name: str) -> bool:
-    """Close an external-CDP browser only when it owns ``profile_name``.
+def close_profile_owned_cdp_browser(cdp_url: str, profile_name: str = "default") -> bool:
+    """Close a local CDP browser only after proving profile ownership.
 
-    External CDP is normally caller-owned and should be left running. Recovery
-    integrations may instead launch the CLI's dedicated per-profile browser and
-    then attach through external CDP. This helper lets those integrations
-    release the managed profile lock without broad browser termination.
-
-    Ownership is proved fail-closed from a loopback listener PID, exact CDP
-    port, and exact ``--user-data-dir`` for the requested NotebookLM profile.
-    Foreign browsers, remote CDP endpoints, and unverifiable processes are
-    never closed.
+    This is intended for externally managed browsers. It never touches a
+    remote endpoint, and it refuses to clear the port mapping if a different
+    process replaces the managed listener while shutdown is in progress.
     """
     try:
-        http_url = normalize_cdp_http_url(cdp_url)
-        parsed = urlparse(http_url)
-        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        cdp_http_url = normalize_cdp_http_url(cdp_url)
+        parsed = urlparse(cdp_http_url)
+        host = (parsed.hostname or "").casefold().rstrip(".")
+        if parsed.scheme not in {"http", "https"} or host not in {
+            "127.0.0.1",
+            "localhost",
+            "::1",
+        }:
             return False
         if parsed.port is None:
             return False
@@ -1157,46 +1165,41 @@ def close_profile_owned_cdp_browser(cdp_url: str, profile_name: str) -> bool:
         if pid is None or not _mapped_chrome_owns_profile(pid, profile_name, port):
             return False
 
-        version_info = _fetch_cdp_version(port, timeout=1)
-        debugger_url = (
-            _normalize_ws_url(version_info.get("webSocketDebuggerUrl")) if version_info else None
-        )
-
+        version = _fetch_cdp_version(port, timeout=1)
+        debugger_url = _normalize_ws_url((version or {}).get("webSocketDebuggerUrl"))
         if debugger_url:
-            # Browser.close commonly tears down the transport before the
-            # response is observed. Verify exit below before a forceful
-            # fallback.
             with contextlib.suppress(Exception):
                 execute_cdp_command(debugger_url, "Browser.close")
-
             for _ in range(20):
-                if not _pid_is_alive(pid):
-                    break
                 time.sleep(0.1)
-
-        if _pid_is_alive(pid):
-            # Browser.close may fail or race with browser shutdown. Re-prove
-            # listener/profile ownership immediately before any forceful kill
-            # so a recycled PID or foreign replacement can never be targeted.
-            current_pid = _listener_pid(port)
-            if current_pid != pid or not _mapped_chrome_owns_profile(
-                current_pid, profile_name, port
-            ):
-                return False
-
-            _kill_process(pid)
-            for _ in range(20):
                 if not _pid_is_alive(pid):
-                    break
-                time.sleep(0.1)
-            if _pid_is_alive(pid):
-                return False
+                    replacement_pid = _listener_pid(port)
+                    if replacement_pid not in (None, pid):
+                        return False
+                    _clear_port_map(port)
+                    return True
 
-        _clear_port_map(port)
-        return True
+        if not _pid_is_alive(pid):
+            replacement_pid = _listener_pid(port)
+            if replacement_pid not in (None, pid):
+                return False
+            _clear_port_map(port)
+            return True
+
+        current_pid = _listener_pid(port)
+        if current_pid != pid or not _mapped_chrome_owns_profile(pid, profile_name, port):
+            return False
+
+        _kill_process(pid)
+        for _ in range(20):
+            time.sleep(0.1)
+            if not _pid_is_alive(pid):
+                if _listener_pid(port) is not None:
+                    return False
+                _clear_port_map(port)
+                return True
+        return False
     except Exception:
-        # Failure to prove ownership must never widen into a generic browser
-        # kill.
         return False
 
 
@@ -1712,19 +1715,33 @@ def extract_cookies_via_cdp(
         # as the profile-lock handoff described in #277. CDP readiness remains
         # authoritative when it appears during that grace window.
         debugger_url = None
-        launcher_exit_poll: int | None = None
-        launcher_exit_grace_polls = 5
+        launcher_exit_attempt: int | None = None
         for attempt in range(30):
+            launcher_exited = _chrome_process is not None and _chrome_process.poll() is not None
+            if launcher_exited and launcher_exit_attempt is None:
+                launcher_exit_attempt = attempt
+
             debugger_url = get_debugger_url(port, tries=1, timeout=1)
             if debugger_url:
+                launcher_exited = _chrome_process is not None and _chrome_process.poll() is not None
+                if launcher_exited and launcher_exit_attempt is None:
+                    launcher_exit_attempt = attempt
+                # On Windows, the launcher can exit after handing off to an
+                # existing Chrome process. Do not accept a late listener
+                # until its PID is proven to own this profile.
+                if (
+                    platform.system() != "Windows"
+                    or not launcher_exited
+                    or _profile_owned_cdp_listener(port, profile_name)
+                ):
+                    break
+                debugger_url = None
+
+            if launcher_exited and (
+                platform.system() != "Windows"
+                or (launcher_exit_attempt is not None and attempt - launcher_exit_attempt >= 5)
+            ):
                 break
-            if _chrome_process is not None and _chrome_process.poll() is not None:
-                if platform.system() != "Windows":
-                    break
-                if launcher_exit_poll is None:
-                    launcher_exit_poll = attempt
-                elif attempt - launcher_exit_poll >= launcher_exit_grace_polls:
-                    break
             if attempt < 29:
                 time.sleep(1)
 

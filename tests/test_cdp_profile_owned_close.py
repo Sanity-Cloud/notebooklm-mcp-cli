@@ -96,6 +96,25 @@ def test_close_profile_owned_cdp_browser_rechecks_ownership_before_force_kill(mo
     assert cleared == []
 
 
+def test_close_profile_owned_cdp_browser_preserves_replacement_mapping(monkeypatch):
+    listener_pids = iter([4242, 4242, 9999])
+    alive = iter([True, True, False, False])
+    killed: list[int] = []
+    cleared: list[int] = []
+
+    monkeypatch.setattr(cdp, "_listener_pid", lambda _port: next(listener_pids))
+    monkeypatch.setattr(cdp, "_mapped_chrome_owns_profile", lambda *_args: True)
+    monkeypatch.setattr(cdp, "_fetch_cdp_version", lambda _port, timeout=1: None)
+    monkeypatch.setattr(cdp, "_pid_is_alive", lambda _pid: next(alive))
+    monkeypatch.setattr(cdp, "_kill_process", killed.append)
+    monkeypatch.setattr(cdp, "_clear_port_map", cleared.append)
+    monkeypatch.setattr(cdp.time, "sleep", lambda _seconds: None)
+
+    assert cdp.close_profile_owned_cdp_browser("http://127.0.0.1:9227", "harmonywave13") is False
+    assert killed == [4242]
+    assert cleared == []
+
+
 def test_close_profile_owned_cdp_browser_reports_failed_force_kill(monkeypatch):
     killed: list[int] = []
     cleared: list[int] = []

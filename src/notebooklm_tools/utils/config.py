@@ -23,7 +23,7 @@ STORAGE_DIR_NAME = ".notebooklm-mcp-cli"
 def get_home_dir() -> Path:
     """Resolve a writable home anchor without failing at module import.
 
-    Service and hermetic runtimes can intentionally omit HOME/USERPROFILE.  The
+    Service and hermetic runtimes can intentionally omit HOME/USERPROFILE. The
     CLI still needs deterministic local state in that case, but importing the
     package must not crash before an explicit NOTEBOOKLM_MCP_CLI_PATH override
     can be honored.
@@ -31,12 +31,12 @@ def get_home_dir() -> Path:
     try:
         return Path.home()
     except RuntimeError:
+        if configured := str(os.environ.get("NOTEBOOKLM_MCP_CLI_PATH") or "").strip():
+            return Path(configured).parent
         for name in ("USERPROFILE", "HOME"):
             value = str(os.environ.get(name) or "").strip()
             if value:
                 return Path(value)
-        if configured := str(os.environ.get("NOTEBOOKLM_MCP_CLI_PATH") or "").strip():
-            return Path(configured).parent
         return Path.cwd() / ".notebooklm-home"
 
 
@@ -212,9 +212,10 @@ def get_snap_chrome_profile_dir(
 
 
 def get_firefox_profile_dir(profile_name: str = "default") -> Path:
-    """Get Firefox profile directory kept for backwards compatibility."""
+    """Get the persistent Firefox profile directory for automated auth."""
     firefox_dir = get_storage_dir() / "firefox-profiles" / profile_name
-    safe_mkdir(firefox_dir, parents=True)
+    safe_mkdir(firefox_dir, parents=True, mode=0o700)
+    firefox_dir.chmod(0o700)
     return firefox_dir
 
 
@@ -442,7 +443,7 @@ class AuthConfig(BaseModel):
     browser: str = Field(
         default="auto",
         description=(
-            "Browser for auth: auto, chrome, arc, brave, edge, edge-beta, chromium, vivaldi, opera"
+            "Browser for auth: auto, chrome, arc, brave, edge, edge-beta, chromium, firefox, vivaldi, opera"
         ),
     )
     default_profile: str = Field(default="default", description="Default profile name")

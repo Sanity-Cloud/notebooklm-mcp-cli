@@ -19,12 +19,15 @@ def test_native_event_is_gated_and_secret_safe(monkeypatch, capsys) -> None:
     assert capsys.readouterr().err == ""
 
     monkeypatch.setenv("SANITYCLOUD_DIAGNOSTIC_CONTRACT_VERSION", CONTRACT_VERSION)
-    assert emit_diagnostic_event(
-        code="NOTEBOOKLM_PROVIDER_ERROR",
-        message="Bearer abc123secret should be hidden",
-        operation="test_event",
-        details={"cookies": "do-not-emit", "provider_code": 502},
-    ) is True
+    assert (
+        emit_diagnostic_event(
+            code="NOTEBOOKLM_PROVIDER_ERROR",
+            message="Bearer abc123secret should be hidden",
+            operation="test_event",
+            details={"cookies": "do-not-emit", "provider_code": 502},
+        )
+        is True
+    )
     event = _event(capsys.readouterr().err)
     assert event["details"]["cookies"] == "[REDACTED]"
     assert event["details"]["provider_code"] == 502
@@ -34,7 +37,9 @@ def test_native_event_is_gated_and_secret_safe(monkeypatch, capsys) -> None:
 def test_error_result_preserves_response_shape_and_emits_one_event(monkeypatch, capsys) -> None:
     monkeypatch.setenv("SANITYCLOUD_DIAGNOSTIC_CONTRACT_VERSION", CONTRACT_VERSION)
 
-    result = error_result("Notebook was unavailable", hint="Retry later", status="error", notebook_id="nb-1")
+    result = error_result(
+        "Notebook was unavailable", hint="Retry later", status="error", notebook_id="nb-1"
+    )
 
     assert result == {
         "status": "error",

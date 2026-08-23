@@ -17,7 +17,9 @@ _SENSITIVE_KEY_RE = re.compile(
 )
 _TEXT_PATTERNS = (
     re.compile(r"(?i)Bearer\s+[A-Za-z0-9._~+/=-]+"),
-    re.compile(r"(?i)\b(?:token|password|secret|cookie|authorization|api[_-]?key)\s*[:=]\s*[^\s,;]+"),
+    re.compile(
+        r"(?i)\b(?:token|password|secret|cookie|authorization|api[_-]?key)\s*[:=]\s*[^\s,;]+"
+    ),
 )
 
 
@@ -85,7 +87,9 @@ def emit_diagnostic_event(
         "evidence": _safe(list(evidence or [])),
     }
     try:
-        sys.stderr.write(EVENT_PREFIX + json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+        sys.stderr.write(
+            EVENT_PREFIX + json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+        )
         sys.stderr.flush()
         return True
     except Exception:  # pragma: no cover - diagnostics must never mask the tool result

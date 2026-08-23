@@ -459,6 +459,7 @@ class AuthManager:
         force: bool = False,
         build_label: str | None = None,
         base_host: str | None = None,
+        browser_backend: str | None = None,
     ) -> Profile:
         """Save credentials to the current profile.
 
@@ -468,7 +469,7 @@ class AuthManager:
         """
         from datetime import datetime
 
-        from notebooklm_tools.core.exceptions import AccountMismatchError
+        from notebooklm_tools.core.exceptions import AccountMismatchError, AuthenticationError
 
         # Guard: check for account mismatch before overwriting
         if not force and email and self.metadata_file.exists():
@@ -483,6 +484,12 @@ class AuthManager:
                     )
             except (json.JSONDecodeError, KeyError):
                 pass  # Corrupted metadata, allow overwrite
+
+        if not force and browser_backend == "firefox_profile" and self.profile_exists():
+            raise AuthenticationError(
+                message="Firefox login cannot verify the Google account for an existing profile",
+                hint="Confirm the account, then run 'nlm login --force' to replace the saved credentials.",
+            )
 
         from notebooklm_tools.utils.config import safe_mkdir
 
@@ -501,13 +508,15 @@ class AuthManager:
         with f:
             json.dump(cookies, f, indent=2, ensure_ascii=False)
 
-        # Preserve existing email if new email is None
-        if email is None and self.metadata_file.exists():
-            try:
-                existing_metadata = json.loads(self.metadata_file.read_text(encoding="utf-8"))
-                email = existing_metadata.get("email")
-            except Exception:
-                pass
+        preserved_metadata: dict[str, Any] = {}
+        if self.metadata_file.exists():
+            with contextlib.suppress(Exception):
+                preserved_metadata = json.loads(self.metadata_file.read_text(encoding="utf-8"))
+
+        if email is None:
+            email = preserved_metadata.get("email")
+        if browser_backend is None:
+            browser_backend = preserved_metadata.get("browser_backend")
 
         # Save metadata with restrictive permissions from creation
         metadata = {
@@ -516,6 +525,7 @@ class AuthManager:
             "email": email,
             "build_label": build_label,
             "base_host": base_host,
+            "browser_backend": browser_backend,
             "last_validated": datetime.now().isoformat(),
         }
         fd = os.open(str(self.metadata_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -598,11 +608,14 @@ class AuthManager:
 
     def login_with_file(self, file_path: str | Path) -> Profile:
         """Parse cookies from file and save to profile."""
+        from urllib.parse import urlparse
+
         from notebooklm_tools.core.exceptions import AuthenticationError
         from notebooklm_tools.utils.browser import (
             parse_cookies_from_file,
             validate_notebooklm_cookies,
         )
+        from notebooklm_tools.utils.config import _ALLOWED_BASE_HOSTS
 
         cookies = parse_cookies_from_file(file_path)
 
@@ -612,7 +625,35 @@ class AuthManager:
                 hint="Make sure the file contains cookies from a NotebookLM session.",
             )
 
-        return self.save_profile(cookies)
+        base_urls = [get_base_url()]
+        if not os.environ.get("NOTEBOOKLM_BASE_URL"):
+            rebrand_url = "https://notebook.google.com"
+            if rebrand_url not in base_urls:
+                base_urls.append(rebrand_url)
+
+        responses = 0
+        for base_url in base_urls:
+            try:
+                response = _fetch_notebooklm_homepage(cookies, base_url=base_url)
+            except Exception as exc:
+                logger.debug("Manual login host probe failed for %s: %s", base_url, exc)
+                continue
+
+            responses += 1
+            final_host = urlparse(str(response.url)).hostname or ""
+            if response.status_code == 200 and final_host in _ALLOWED_BASE_HOSTS:
+                return self.save_profile(cookies, base_host=final_host)
+
+        if responses == 0:
+            raise AuthenticationError(
+                message="Could not reach Gemini Notebook to verify imported cookies",
+                hint="Check your network connection and NOTEBOOKLM_BASE_URL, then try again.",
+            )
+
+        raise AuthenticationError(
+            message="Imported cookies were rejected by Gemini Notebook",
+            hint="Export fresh cookies from an authenticated Gemini Notebook session and try again.",
+        )
 
 
 def get_auth_manager(profile: str | None = None) -> AuthManager:

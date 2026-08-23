@@ -164,7 +164,15 @@ def query_notebook(
     ),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Profile to use"),
     timeout: float | None = typer.Option(
-        None, "--timeout", "-t", help="Query timeout in seconds (default: 120)"
+        None,
+        "--timeout",
+        "-t",
+        help="Query timeout in seconds (default: 120; source-heavy notebooks may need 180+)",
+    ),
+    new_conversation: bool = typer.Option(
+        False,
+        "--new-conversation",
+        help="Start a fresh conversation instead of reusing the notebook's chat",
     ),
 ) -> None:
     """Chat with notebook sources."""
@@ -180,6 +188,7 @@ def query_notebook(
                 source_ids=sources,
                 conversation_id=conversation_id,
                 timeout=timeout,
+                new_conversation=new_conversation,
             )
 
         fmt = detect_output_format(json_output)

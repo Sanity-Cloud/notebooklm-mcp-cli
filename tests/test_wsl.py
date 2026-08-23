@@ -1,6 +1,7 @@
 """Tests for WSL networking utilities."""
 
 import subprocess
+from pathlib import Path
 from unittest.mock import Mock, call
 
 from notebooklm_tools.utils import wsl
@@ -20,6 +21,7 @@ def test_get_windows_host_ip_uses_loopback_in_mirrored_mode(monkeypatch):
         ["wslinfo", "--networking-mode"],
         capture_output=True,
         text=True,
+        errors="replace",
         check=True,
         timeout=5,
     )
@@ -41,10 +43,17 @@ def test_get_windows_host_ip_uses_gateway_in_nat_mode(monkeypatch):
             ["wslinfo", "--networking-mode"],
             capture_output=True,
             text=True,
+            errors="replace",
             check=True,
             timeout=5,
         ),
-        call(["ip", "route"], capture_output=True, text=True, check=True),
+        call(
+            ["ip", "route"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            check=True,
+        ),
     ]
 
 
@@ -59,3 +68,50 @@ def test_get_windows_host_ip_uses_gateway_when_wslinfo_is_unavailable(monkeypatc
     monkeypatch.setattr(wsl.subprocess, "run", run)
 
     assert wsl.get_windows_host_ip() == "172.20.112.1"
+
+
+def test_launch_windows_chrome_preserves_non_ascii_windows_temp_path(monkeypatch):
+    monkeypatch.setattr(wsl, "is_wsl", lambda: True)
+    monkeypatch.setattr(
+        wsl,
+        "find_windows_chrome",
+        lambda: r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    )
+
+    calls = []
+    powershell_call = None
+    pwsh_path = Path("/mnt/c/Program Files/PowerShell/7/pwsh.exe")
+    monkeypatch.setattr(wsl, "_get_powershell_path", lambda: pwsh_path)
+
+    def run(args, **kwargs):
+        nonlocal powershell_call
+        calls.append((args, kwargs))
+        if args[0] == str(pwsh_path):
+            powershell_call = (args, kwargs)
+            return _result(args, "C:\\Users\\王小明\\AppData\\Local\\Temp\\")
+        if args[0] == "wslpath" and args[1] == "-u":
+            return _result(args, "/tmp/nlm-chrome")
+        return _result(args, "")
+
+    class FakeProcess:
+        pid = 4242
+
+    popen_args = []
+    monkeypatch.setattr(wsl.subprocess, "run", run)
+    monkeypatch.setattr(
+        wsl.subprocess, "Popen", lambda args, **_: popen_args.append(args) or FakeProcess()
+    )
+
+    process = wsl.launch_windows_chrome()
+
+    assert process.pid == 4242
+    assert powershell_call is not None
+    powershell_args, powershell_kwargs = powershell_call
+    assert powershell_kwargs["encoding"] == "utf-8"
+    assert powershell_kwargs["errors"] == "strict"
+    assert "OutputEncoding" in powershell_args[-1]
+    assert any(
+        arg.startswith("--user-data-dir=C:\\Users\\王小明\\AppData\\Local\\Temp")
+        and "nlm-chrome-" in arg
+        for arg in popen_args[0]
+    )

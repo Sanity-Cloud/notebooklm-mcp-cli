@@ -189,11 +189,11 @@ class TestBrowserDetection:
             assert browser in names, f"{browser!r} missing from Linux candidates"
 
     def test_windows_candidates_include_expected_browsers(self):
-        """Windows candidate list should include Chrome, Edge, and Brave."""
+        """Windows candidate list should include Chromium-based browsers."""
         from notebooklm_tools.utils.cdp import _windows_browser_candidates
 
         names = [name for name, _ in _windows_browser_candidates()]
-        for browser in ("Google Chrome", "Microsoft Edge", "Brave Browser"):
+        for browser in ("Google Chrome", "Chromium", "Microsoft Edge", "Brave Browser"):
             assert browser in names, f"{browser!r} missing from Windows candidates"
 
     def test_windows_candidates_include_localappdata_paths(self):
@@ -218,7 +218,9 @@ class TestBrowserDetection:
         monkeypatch.delenv("HOME", raising=False)
         monkeypatch.setenv("NOTEBOOKLM_MCP_CLI_PATH", str(storage_dir))
 
-        with patch("pathlib.Path.home", side_effect=RuntimeError("Could not determine home directory.")):
+        with patch(
+            "pathlib.Path.home", side_effect=RuntimeError("Could not determine home directory.")
+        ):
             paths = [path for _, path in _windows_browser_candidates()]
 
         assert any(str(expected_home / "AppData" / "Local") in path for path in paths)
@@ -429,6 +431,27 @@ class TestCDPStartupHandling:
             patch.object(Path, "exists", fake_exists),
         ):
             result = get_chrome_path()
+        assert result == target_path
+
+    def test_get_chromium_path_windows_honors_preference(self):
+        """The explicit Chromium preference should select Windows Chromium."""
+        from notebooklm_tools.utils.cdp import _get_chromium_path, _windows_browser_candidates
+
+        chromium_paths = [
+            path for name, path in _windows_browser_candidates() if name == "Chromium"
+        ]
+        assert chromium_paths, "Windows Chromium candidates should be defined"
+        target_path = chromium_paths[0]
+
+        def fake_exists(self):
+            return str(self) == target_path
+
+        with (
+            patch("notebooklm_tools.utils.cdp.platform.system", return_value="Windows"),
+            patch.object(Path, "exists", fake_exists),
+        ):
+            result = _get_chromium_path("chromium")
+
         assert result == target_path
 
     def test_get_chrome_path_windows_returns_none_when_nothing_exists(self):
