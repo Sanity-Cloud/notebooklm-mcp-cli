@@ -27,6 +27,14 @@ def mock_client():
     return client
 
 
+def test_query_budget_never_exceeds_configured_timeout():
+    from notebooklm_tools.services.chat import _QueryBudget
+
+    with patch("notebooklm_tools.services.chat.time.monotonic", side_effect=[8.3, 8.3]):
+        budget = _QueryBudget(120.0)
+        assert budget.remaining() == 120.0
+
+
 class TestQuery:
     """Test query service function."""
 
