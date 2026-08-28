@@ -381,7 +381,7 @@ def test_resolve_pwsh7_path_prefers_real_program_files_binary(tmp_path, monkeypa
     expected = program_files / "PowerShell" / "7" / "pwsh.exe"
     expected.parent.mkdir(parents=True)
     expected.write_text("", encoding="utf-8")
-    monkeypatch.setenv("ProgramFiles", str(program_files))
+    monkeypatch.setenv("PROGRAMFILES", str(program_files))
     monkeypatch.setattr(
         cdp.shutil,
         "which",
@@ -392,7 +392,7 @@ def test_resolve_pwsh7_path_prefers_real_program_files_binary(tmp_path, monkeypa
 
 
 def test_resolve_pwsh7_path_fails_closed_without_real_binary(tmp_path, monkeypatch):
-    monkeypatch.setenv("ProgramFiles", str(tmp_path / "missing"))
+    monkeypatch.setenv("PROGRAMFILES", str(tmp_path / "missing"))
     monkeypatch.setattr(
         cdp.shutil,
         "which",
