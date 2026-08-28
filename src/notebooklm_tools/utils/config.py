@@ -6,10 +6,12 @@ Supports automatic migration from old locations:
 - ~/.nlm/ (old CLI location)
 """
 
+import json
 import os
 import shutil
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlparse
 
 from pydantic import BaseModel, Field
 
@@ -68,6 +70,7 @@ _ALLOWED_BASE_HOSTS = {
     "notebook.google.com",
     "notebooklm.cloud.google.com",
     "notebook.cloud.google.com",
+    "vertexaisearch.cloud.google.com",
 }
 
 
@@ -94,13 +97,47 @@ def get_base_url(profile_host: str | None = None) -> str:
             raise ValueError(
                 f"NOTEBOOKLM_BASE_URL must use https and one of: {_ALLOWED_BASE_HOSTS}. Got: {url}"
             )
-        return url
+        return f"{parsed.scheme}://{parsed.netloc}"
 
     if profile_host and profile_host in _ALLOWED_BASE_HOSTS:
         return f"https://{profile_host}"
 
     url = "https://notebooklm.google.com"
     return url
+
+
+def get_enterprise_project_id() -> str:
+    """Get GCP Project ID for Gemini Notebook Enterprise (from NOTEBOOKLM_PROJECT_ID or default)."""
+    return os.environ.get("NOTEBOOKLM_PROJECT_ID", "").strip()
+
+
+def get_enterprise_location() -> str:
+    """Get GCP Location/Region for Gemini Notebook Enterprise (from NOTEBOOKLM_LOCATION or default 'global').
+
+    Supported locations include: 'global', 'us', 'eu', or specific regions.
+    """
+    loc = os.environ.get("NOTEBOOKLM_LOCATION", "").strip()
+    return loc if loc else "global"
+
+
+def get_notebook_url(notebook_id: str) -> str:
+    """Build the browser URL for a notebook on the configured host."""
+    base_url = get_base_url()
+    host = (urlparse(base_url).hostname or "").lower()
+    if host not in {
+        "notebooklm.cloud.google.com",
+        "notebook.cloud.google.com",
+        "vertexaisearch.cloud.google.com",
+    }:
+        return f"{base_url}/notebook/{quote(notebook_id, safe='')}"
+
+    location = get_enterprise_location()
+    prefix = (
+        f"/notebooklm/{location}" if host == "vertexaisearch.cloud.google.com" else f"/{location}"
+    )
+    url = f"{base_url}{prefix}/notebook/{quote(notebook_id, safe='')}"
+    project_id = get_enterprise_project_id()
+    return f"{url}?project={quote(project_id, safe='')}" if project_id else url
 
 
 def get_default_language() -> str:
@@ -443,8 +480,12 @@ class AuthConfig(BaseModel):
     browser: str = Field(
         default="auto",
         description=(
-            "Browser for auth: auto, chrome, arc, brave, edge, edge-beta, chromium, firefox, vivaldi, opera"
+            "Browser for auth: auto, chrome, arc, brave, dia, comet, edge, edge-beta, chromium, firefox, vivaldi, opera"
         ),
+    )
+    browser_path: str = Field(
+        default="",
+        description="Optional path to a Chromium-compatible browser executable",
     )
     default_profile: str = Field(default="default", description="Default profile name")
 
@@ -481,6 +522,9 @@ def load_config() -> Config:
     if browser := os.environ.get("NLM_BROWSER"):
         config_data.setdefault("auth", {})["browser"] = browser
 
+    if browser_path := os.environ.get("NLM_BROWSER_PATH"):
+        config_data.setdefault("auth", {})["browser_path"] = browser_path
+
     if profile := os.environ.get("NLM_PROFILE"):
         config_data.setdefault("auth", {})["default_profile"] = profile
 
@@ -509,6 +553,7 @@ def _config_to_toml(config: Config) -> str:
 
     lines.append("[auth]")
     lines.append(f'browser = "{config.auth.browser}"')
+    lines.append(f"browser_path = {json.dumps(config.auth.browser_path)}")
     lines.append(f'default_profile = "{config.auth.default_profile}"')
     lines.append("")
 

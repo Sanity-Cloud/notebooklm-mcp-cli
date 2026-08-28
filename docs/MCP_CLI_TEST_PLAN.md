@@ -84,6 +84,28 @@ List all my NotebookLM notebooks.
 
 ---
 
+### Test 1.3E - Enterprise List and Query
+
+Before running this test, set `NOTEBOOKLM_BASE_URL`, `NOTEBOOKLM_PROJECT_ID`,
+and `NOTEBOOKLM_LOCATION` for a Gemini Notebook Enterprise deployment. The
+project setting is required; the location defaults to `global`. Authenticate
+the profile and make it the default profile used by MCP:
+
+```bash
+nlm login --profile enterprise
+nlm login switch enterprise
+nlm notebook list
+nlm notebook query <enterprise-notebook-id> "Summarize the sources" --new-conversation
+```
+
+**Expected:** Login opens the configured regional project URL, list returns
+Enterprise notebooks, and the query uses the Enterprise streamed endpoint.
+This test is not complete until it is run against an Enterprise deployment with
+a redacted request/response capture; the automated suite only verifies routing
+and payload contracts.
+
+---
+
 ### Test 1.4 - Create Notebook
 **Tool:** `notebook_create`
 **CLI:** `nlm notebook create "MCP Test Notebook"`
@@ -718,7 +740,21 @@ Download slide deck from notebook [notebook_id]:
 
 ---
 
-### Test 6.6 - Download All Artifacts
+### Test 6.6 - Download Data Table Excel Export
+**Tool:** `download_artifact`
+
+**Prompt:**
+```
+Download the Excel data-table export from notebook [notebook_id]:
+- artifact_type: data_table_xlsx
+- output_path: /tmp/data-table.xlsx
+```
+
+**Expected:** The completed type-10 artifact is downloaded byte-for-byte as XLSX.
+
+---
+
+### Test 6.7 - Download All Artifacts
 **Tool:** `download_all_artifacts`
 **CLI:** `nlm download all [notebook_id] --output-dir /tmp/exports`
 
