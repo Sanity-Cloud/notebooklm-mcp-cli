@@ -47,20 +47,18 @@ jobs:
           new_return = '''        return min(remaining, self._timeout)\n'''
           if text.count(old_init) != 1 or text.count(old_return) != 1:
               raise SystemExit("query budget source contract changed unexpectedly")
-          text = text.replace(old_init, new_init).replace(old_return, new_return)
-          source.write_text(text, encoding="utf-8")
+          source.write_text(
+              text.replace(old_init, new_init).replace(old_return, new_return),
+              encoding="utf-8",
+          )
 
           test_path = Path("tests/services/test_chat.py")
           tests = test_path.read_text(encoding="utf-8")
-          import_anchor = '''from notebooklm_tools.services.chat import (\n    _QUERY_TTL_SECONDS,\n'''
-          import_replacement = '''from notebooklm_tools.services.chat import (\n    _QUERY_TTL_SECONDS,\n    _QueryBudget,\n'''
           class_anchor = '''class TestQuery:\n'''
-          regression = '''def test_query_budget_never_exceeds_configured_timeout():\n    with patch("notebooklm_tools.services.chat.time.monotonic", side_effect=[8.3, 8.3]):\n        budget = _QueryBudget(120.0)\n        assert budget.remaining() == 120.0\n\n\n'''
-          if tests.count(import_anchor) != 1 or tests.count(class_anchor) != 1:
-              raise SystemExit("chat test insertion anchors changed unexpectedly")
-          tests = tests.replace(import_anchor, import_replacement)
-          tests = tests.replace(class_anchor, regression + class_anchor)
-          test_path.write_text(tests, encoding="utf-8")
+          regression = '''def test_query_budget_never_exceeds_configured_timeout():\n    from notebooklm_tools.services.chat import _QueryBudget\n\n    with patch("notebooklm_tools.services.chat.time.monotonic", side_effect=[8.3, 8.3]):\n        budget = _QueryBudget(120.0)\n        assert budget.remaining() == 120.0\n\n\n'''
+          if tests.count(class_anchor) != 1:
+              raise SystemExit("chat test insertion anchor changed unexpectedly")
+          test_path.write_text(tests.replace(class_anchor, regression + class_anchor), encoding="utf-8")
           PY
           git diff --check
 
