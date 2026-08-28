@@ -1,4 +1,4 @@
-name: TEMP Upstream 0.10 Integration Gate
+name: TEMP Upstream 0.10 Post-Merge Verification
 
 on:
   push:
@@ -6,14 +6,14 @@ on:
       - automation/upstream-0.10.0-sync-20260828
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  merge-linux:
-    name: Merge and verify on Linux
+  verify-linux:
+    name: Verify merged main on Linux
     runs-on: ubuntu-latest
     outputs:
-      integration_sha: ${{ steps.commit.outputs.sha }}
+      main_sha: ${{ steps.identity.outputs.sha }}
     steps:
       - name: Checkout canonical fork main
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
@@ -21,101 +21,21 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9  # v7
-
-      - name: Merge upstream v0.10.0
+      - name: Verify upstream ancestry and capture identity
+        id: identity
         shell: bash
         run: |
           set -euo pipefail
           git remote add upstream https://github.com/jacob-bd/gemini-notebook-mcp-cli.git || true
           git fetch upstream main --tags
           test "$(git rev-parse upstream/main)" = "ba12caed94f7c33f694b15d56086f95af0dc4240"
-          git checkout -B integrate/upstream-0.10.0-verified-20260828 origin/main
-          git merge --no-commit --no-ff upstream/main || true
-
-      - name: Resolve bounded semantic conflicts
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          import re
-
-          expected = {
-              "CHANGELOG.md": 1,
-              "src/notebooklm_tools/utils/auth_browser.py": 1,
-              "src/notebooklm_tools/utils/cdp.py": 1,
-              "src/notebooklm_tools/utils/config.py": 1,
-          }
-
-          pattern = re.compile(
-              r"<<<<<<< HEAD\n(.*?)=======\n(.*?)>>>>>>> [^\n]+\n?",
-              re.DOTALL,
-          )
-
-          for filename, expected_count in expected.items():
-              path = Path(filename)
-              text = path.read_text(encoding="utf-8")
-              matches = list(pattern.finditer(text))
-              if len(matches) != expected_count:
-                  raise SystemExit(
-                      f"{filename}: expected {expected_count} conflict block(s), found {len(matches)}"
-                  )
-
-              def resolve(match: re.Match[str]) -> str:
-                  ours, theirs = match.group(1), match.group(2)
-                  if filename == "CHANGELOG.md":
-                      return ours.rstrip() + "\n" + theirs.lstrip()
-                  if filename.endswith("auth_browser.py"):
-                      return (
-                          '    "dia",\n'
-                          '    "comet",\n'
-                          '    "edge",\n'
-                          '    "edge-beta",\n'
-                      )
-                  if filename.endswith("cdp.py"):
-                      return (
-                          "    Valid names: auto, chrome, arc, brave, dia, comet, edge, "
-                          "edge-beta, chromium, vivaldi, opera.\n"
-                      )
-                  if filename.endswith("config.py"):
-                      return (
-                          '            "Browser for auth: auto, chrome, arc, brave, dia, comet, '
-                          'edge, edge-beta, chromium, firefox, vivaldi, opera"\n'
-                      )
-                  raise AssertionError(filename)
-
-              text = pattern.sub(resolve, text)
-              path.write_text(text, encoding="utf-8")
-
-          # Upstream's macOS Comet test hard-codes a POSIX string. On a Windows
-          # runner pathlib follows Windows semantics even when platform.system()
-          # is mocked to Darwin, so make the expectation use the same Path logic
-          # as production browser discovery.
-          test_path = Path("tests/test_auth_browser.py")
-          test_text = test_path.read_text(encoding="utf-8")
-          old = '    expected = "/Applications/Comet.app/Contents/MacOS/Comet"'
-          new = '    expected = str(Path("/Applications") / "Comet.app/Contents/MacOS/Comet")'
-          if old not in test_text:
-              raise SystemExit("Comet portability fixture not found exactly once")
-          if test_text.count(old) != 1:
-              raise SystemExit("Comet portability fixture is ambiguous")
-          test_path.write_text(test_text.replace(old, new), encoding="utf-8")
-          PY
-
-          if git grep -n -E '^(<<<<<<<|=======|>>>>>>>)' -- '*.py' '*.md'; then
-            echo 'Conflict markers remain' >&2
-            exit 1
-          fi
-          git add CHANGELOG.md \
-            src/notebooklm_tools/utils/auth_browser.py \
-            src/notebooklm_tools/utils/cdp.py \
-            src/notebooklm_tools/utils/config.py \
-            tests/test_auth_browser.py
-          unresolved="$(git diff --name-only --diff-filter=U)"
-          test -z "$unresolved" || { echo "$unresolved"; exit 1; }
+          git merge-base --is-ancestor upstream/main HEAD
+          test -z "$(git diff --name-only --diff-filter=U)"
           git diff --check
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9  # v7
 
       - name: Focused compatibility tests
         run: >-
@@ -141,39 +61,19 @@ jobs:
       - name: Full non-E2E suite on Linux
         run: uv run --dev --with pytest-github-actions-annotate-failures --with pytest-asyncio pytest -q -m "not e2e"
 
-      - name: Commit and push verified integration branch
-        id: commit
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "SanityCloud Integration Bot"
-          git config user.email "actions@users.noreply.github.com"
-          git commit -m "merge: update SanityCloud NotebookLM core to upstream 0.10.0"
-          git push origin HEAD:refs/heads/integrate/upstream-0.10.0-verified-20260828 --force-with-lease
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
   verify-windows:
-    name: Verify exact merge on Windows
-    needs: merge-linux
+    name: Verify exact merged main on Windows
+    needs: verify-linux
     runs-on: windows-latest
     steps:
-      - name: Checkout exact integration commit
+      - name: Checkout exact verified main commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
         with:
-          ref: ${{ needs.merge-linux.outputs.integration_sha }}
+          ref: ${{ needs.verify-linux.outputs.main_sha }}
           fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9  # v7
-
-      - name: Ruff lint
-        run: uv run --dev ruff check . --output-format=github
-
-      - name: Ruff format check
-        run: uv run --dev ruff format --check .
-
-      - name: Build package
-        run: uv build
 
       - name: Focused Windows compatibility tests
         run: >-
@@ -186,6 +86,15 @@ jobs:
           tests/test_profile_aware_headless_auth.py
           tests/core/test_auth_check.py
           tests/test_base_url_resolution.py
+
+      - name: Ruff lint
+        run: uv run --dev ruff check . --output-format=github
+
+      - name: Ruff format check
+        run: uv run --dev ruff format --check .
+
+      - name: Build package
+        run: uv build
 
       - name: Full non-E2E suite on Windows
         run: uv run --dev --with pytest-github-actions-annotate-failures --with pytest-asyncio pytest -q -m "not e2e"
