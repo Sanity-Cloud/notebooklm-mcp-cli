@@ -11,6 +11,8 @@ CHROMIUM_BROWSER_KEYS = {
     "chrome",
     "arc",
     "brave",
+    "dia",
+    "comet",
     "edge",
     "edge-beta",
     "chromium",
