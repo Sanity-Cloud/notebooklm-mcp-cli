@@ -26,13 +26,14 @@ class _QueryBudget:
 
     def __init__(self, timeout: float | None):
         effective_timeout = DEFAULT_QUERY_TIMEOUT if timeout is None else timeout
-        self._deadline = time.monotonic() + effective_timeout
+        self._timeout = float(effective_timeout)
+        self._deadline = time.monotonic() + self._timeout
 
     def remaining(self) -> float:
         remaining = self._deadline - time.monotonic()
         if remaining <= 0:
             raise httpx.ReadTimeout("The query deadline expired before the next request")
-        return remaining
+        return min(remaining, self._timeout)
 
 
 _QUERY_REJECTION_METADATA: dict[int, dict[str, str | bool]] = {
