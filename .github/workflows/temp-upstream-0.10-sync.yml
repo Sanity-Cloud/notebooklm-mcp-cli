@@ -1,4 +1,4 @@
-name: TEMP Upstream 0.10 Portability Repair Gate
+name: TEMP Upstream 0.10 Timeout Repair Gate
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   repair-linux:
-    name: Repair and verify on Linux
+    name: Repair timeout ceiling and verify on Linux
     runs-on: ubuntu-latest
     outputs:
       repair_sha: ${{ steps.commit.outputs.sha }}
@@ -21,30 +21,46 @@ jobs:
           ref: fix/upstream-0.10-postmerge-portability-20260828
           fetch-depth: 0
 
-      - name: Verify upstream ancestry
+      - name: Verify expected repair parent and upstream ancestry
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "de2038056dd1708c3a72e56a76ad6259522f91d3"
           git remote add upstream https://github.com/jacob-bd/gemini-notebook-mcp-cli.git || true
           git fetch upstream main --tags
           test "$(git rev-parse upstream/main)" = "ba12caed94f7c33f694b15d56086f95af0dc4240"
           git merge-base --is-ancestor upstream/main HEAD
           git diff --check
 
-      - name: Repair Linux-portable Windows environment fixtures
+      - name: Clamp query budget and add deterministic regression
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-          path = Path("tests/test_cdp_port_map.py")
-          text = path.read_text(encoding="utf-8")
-          old = 'monkeypatch.setenv("ProgramFiles",'
-          new = 'monkeypatch.setenv("PROGRAMFILES",'
-          count = text.count(old)
-          if count != 2:
-              raise SystemExit(f"expected 2 ProgramFiles fixtures, found {count}")
-          path.write_text(text.replace(old, new), encoding="utf-8")
+
+          source = Path("src/notebooklm_tools/services/chat.py")
+          text = source.read_text(encoding="utf-8")
+          old_init = '''        effective_timeout = DEFAULT_QUERY_TIMEOUT if timeout is None else timeout\n        self._deadline = time.monotonic() + effective_timeout\n'''
+          new_init = '''        effective_timeout = DEFAULT_QUERY_TIMEOUT if timeout is None else timeout\n        self._timeout = float(effective_timeout)\n        self._deadline = time.monotonic() + self._timeout\n'''
+          old_return = '''        return remaining\n'''
+          new_return = '''        return min(remaining, self._timeout)\n'''
+          if text.count(old_init) != 1 or text.count(old_return) != 1:
+              raise SystemExit("query budget source contract changed unexpectedly")
+          text = text.replace(old_init, new_init).replace(old_return, new_return)
+          source.write_text(text, encoding="utf-8")
+
+          test_path = Path("tests/services/test_chat.py")
+          tests = test_path.read_text(encoding="utf-8")
+          import_anchor = '''from notebooklm_tools.services.chat import (\n    _QUERY_TTL_SECONDS,\n'''
+          import_replacement = '''from notebooklm_tools.services.chat import (\n    _QUERY_TTL_SECONDS,\n    _QueryBudget,\n'''
+          class_anchor = '''class TestQuery:\n'''
+          regression = '''def test_query_budget_never_exceeds_configured_timeout():\n    with patch("notebooklm_tools.services.chat.time.monotonic", side_effect=[8.3, 8.3]):\n        budget = _QueryBudget(120.0)\n        assert budget.remaining() == 120.0\n\n\n'''
+          if tests.count(import_anchor) != 1 or tests.count(class_anchor) != 1:
+              raise SystemExit("chat test insertion anchors changed unexpectedly")
+          tests = tests.replace(import_anchor, import_replacement)
+          tests = tests.replace(class_anchor, regression + class_anchor)
+          test_path.write_text(tests, encoding="utf-8")
           PY
           git diff --check
 
@@ -54,6 +70,7 @@ jobs:
       - name: Focused compatibility tests
         run: >-
           uv run --dev pytest -q
+          tests/services/test_chat.py
           tests/test_auth_browser.py
           tests/test_cdp_port_map.py
           tests/test_cdp_profile_owned_close.py
@@ -75,20 +92,20 @@ jobs:
       - name: Full non-E2E suite on Linux
         run: uv run --dev --with pytest-github-actions-annotate-failures --with pytest-asyncio pytest -q -m "not e2e"
 
-      - name: Commit verified repair branch
+      - name: Commit verified timeout repair
         id: commit
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "SanityCloud Integration Bot"
           git config user.email "actions@users.noreply.github.com"
-          git add tests/test_cdp_port_map.py
-          git commit -m "test: make PowerShell path fixtures portable across CI"
+          git add src/notebooklm_tools/services/chat.py tests/services/test_chat.py
+          git commit -m "fix: clamp query timeout budget to configured ceiling"
           git push origin HEAD:refs/heads/fix/upstream-0.10-postmerge-portability-20260828
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   verify-windows:
-    name: Verify exact repair commit on Windows
+    name: Verify exact timeout repair commit on Windows
     needs: repair-linux
     runs-on: windows-latest
     steps:
@@ -104,6 +121,7 @@ jobs:
       - name: Focused Windows compatibility tests
         run: >-
           uv run --dev pytest -q
+          tests/services/test_chat.py
           tests/test_auth_browser.py
           tests/test_cdp_port_map.py
           tests/test_cdp_profile_owned_close.py
