@@ -326,14 +326,12 @@ def login_callback(
 
     try:
         from notebooklm_tools.utils.cdp import (
-            close_profile_owned_cdp_browser,
             extract_cookies_via_cdp,
             extract_cookies_via_existing_cdp,
             terminate_chrome,
         )
 
         launched_local_chrome = False
-        external_cdp_url: str | None = None
         managed_browser_backend = ""
         managed_browser_name = ""
 
@@ -472,11 +470,6 @@ def login_callback(
                 wait_for_login=True,
                 login_timeout=300,
             )
-            # Remember the endpoint for ownership-aware cleanup after the
-            # credentials have been saved. The cleanup helper independently
-            # proves that the local listener belongs to this exact NLM profile;
-            # arbitrary external CDP browsers remain untouched.
-            external_cdp_url = cdp_url
         else:
             backend = select_auth_backend()
             if backend is None:
@@ -560,14 +553,12 @@ def login_callback(
             browser_backend=managed_browser_backend or None,
         )
 
-        # Release profile locks after credentials are durably saved. Builtin
-        # browsers are tracked directly; external CDP endpoints are closed only
-        # when the listener can be proven to own this exact NLM profile.
+        # Release only browsers launched by this CLI invocation. External CDP
+        # endpoints are caller-owned; the auth broker validates and closes its
+        # own managed browser after the child login process exits.
         if launched_local_chrome:
             console.print(f"[dim]Closing {managed_browser_name}...[/dim]")
             terminate_chrome()
-        elif external_cdp_url and close_profile_owned_cdp_browser(external_cdp_url, profile):
-            console.print(f"[dim]Closed profile-owned authentication browser for {profile}.[/dim]")
 
         console.print("\n[green]✓[/green] Successfully authenticated!")
         console.print(f"  Profile: {profile}")

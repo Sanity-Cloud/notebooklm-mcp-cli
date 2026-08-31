@@ -92,9 +92,8 @@ def test_login_force_bypasses_saved_profile_validation(monkeypatch, tmp_path):
     assert "Successfully authenticated!" in result.output
 
 
-def test_external_cdp_login_closes_only_profile_owned_browser(monkeypatch):
+def test_external_cdp_login_leaves_caller_managed_browser_open(monkeypatch):
     save_calls = []
-    close_calls = []
 
     class SavingAuthManager(FakeAuthManager):
         def save_profile(self, **kwargs):
@@ -107,19 +106,16 @@ def test_external_cdp_login_closes_only_profile_owned_browser(monkeypatch):
             "cookies": {"SID": "sid"},
             "csrf_token": "csrf",
             "session_id": "session",
-            "email": "harmonywave13@gmail.com",
+            "email": "user@example.com",
             "build_label": "build",
             "base_host": "notebook.google.com",
         },
     )
-
-    def close_owned(cdp_url, profile_name):
-        close_calls.append((cdp_url, profile_name))
-        return True
-
     monkeypatch.setattr(
         "notebooklm_tools.utils.cdp.close_profile_owned_cdp_browser",
-        close_owned,
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("external CDP ownership remains with the caller")
+        ),
     )
 
     result = CliRunner().invoke(
@@ -137,55 +133,7 @@ def test_external_cdp_login_closes_only_profile_owned_browser(monkeypatch):
     )
 
     assert result.exit_code == 0
-    assert close_calls == [("http://127.0.0.1:9227", "harmonywave13")]
-    assert save_calls[0]["email"] == "harmonywave13@gmail.com"
-    assert "Closed profile-owned authentication browser for harmonywave13" in result.output
-
-
-def test_external_cdp_login_leaves_unowned_browser_open(monkeypatch):
-    class SavingAuthManager(FakeAuthManager):
-        def save_profile(self, **_kwargs):
-            return None
-
-    close_calls = []
-    monkeypatch.setattr("notebooklm_tools.core.auth.AuthManager", SavingAuthManager)
-    monkeypatch.setattr(
-        "notebooklm_tools.utils.cdp.extract_cookies_via_existing_cdp",
-        lambda **_kwargs: {
-            "cookies": {"SID": "sid"},
-            "csrf_token": "csrf",
-            "session_id": "session",
-            "email": "user@example.com",
-            "build_label": "build",
-            "base_host": "notebook.google.com",
-        },
-    )
-
-    def refuse_close(cdp_url, profile_name):
-        close_calls.append((cdp_url, profile_name))
-        return False
-
-    monkeypatch.setattr(
-        "notebooklm_tools.utils.cdp.close_profile_owned_cdp_browser",
-        refuse_close,
-    )
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "login",
-            "--profile",
-            "harmonywave13",
-            "--force",
-            "--provider",
-            "openclaw",
-            "--cdp-url",
-            "http://127.0.0.1:9333",
-        ],
-    )
-
-    assert result.exit_code == 0
-    assert close_calls == [("http://127.0.0.1:9333", "harmonywave13")]
+    assert save_calls[0]["email"] == "user@example.com"
     assert "Closed profile-owned authentication browser" not in result.output
 
 
