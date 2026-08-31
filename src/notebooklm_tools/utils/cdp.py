@@ -1102,11 +1102,6 @@ def launch_chrome_process(
     if headless:
         args.append("--headless=new")
 
-    # Open NotebookLM as part of the browser launch itself. This keeps the
-    # managed authentication window deterministic and avoids leaving users on
-    # a blank tab while the CDP login flow is waiting for the application page.
-    args.append(NOTEBOOKLM_URL)
-
     kwargs: dict[str, Any] = {
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
@@ -1298,18 +1293,6 @@ def find_or_create_notebooklm_page_by_cdp_url(cdp_http_url: str) -> dict | None:
         url = page.get("url", "")
         if _is_notebooklm_url(url):
             return page
-
-    # A freshly launched browser normally owns one blank/new-tab page already.
-    # Reuse it before creating another CDP target so interactive login opens a
-    # single NotebookLM tab instead of leaving an unnecessary blank tab behind.
-    for page in pages:
-        url = page.get("url", "")
-        if url in ("about:blank", "chrome://newtab/"):
-            ws_url = _normalize_ws_url(page.get("webSocketDebuggerUrl"))
-            if ws_url:
-                _logger.debug("Reusing blank page with url %s", url)
-                navigate_to_url(ws_url, get_notebooklm_url())
-                return page
 
     try:
         encoded_url = quote(get_notebooklm_url(), safe="")
