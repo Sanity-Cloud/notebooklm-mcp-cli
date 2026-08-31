@@ -117,7 +117,7 @@ def test_find_or_create_notebooklm_page_ignores_accounts_continue_url(monkeypatc
     assert page["url"] == "https://notebooklm.google.com/"
 
 
-def test_find_or_create_notebooklm_page_reuses_blank_tab_before_creating_new_target(
+def test_find_or_create_notebooklm_page_matches_upstream_and_creates_target_before_blank_fallback(
     monkeypatch,
 ) -> None:
     pages = [
@@ -127,20 +127,35 @@ def test_find_or_create_notebooklm_page_reuses_blank_tab_before_creating_new_tar
             "webSocketDebuggerUrl": "ws://127.0.0.1:9223/devtools/page/blank",
         }
     ]
+    calls: list[str] = []
     navigated: list[tuple[str, str]] = []
+
+    class Response:
+        status_code = 200
+        text = '{"url":"https://notebook.google.com/"}'
+
+        @staticmethod
+        def json() -> dict[str, str]:
+            return {
+                "url": "https://notebook.google.com/",
+                "webSocketDebuggerUrl": "ws://127.0.0.1:9223/devtools/page/new",
+            }
 
     monkeypatch.setattr(cdp, "get_pages_by_cdp_url", lambda _: pages)
     monkeypatch.setattr(cdp, "navigate_to_url", lambda ws, url: navigated.append((ws, url)))
-    monkeypatch.setattr(
-        cdp.httpx_client,
-        "put",
-        lambda *_, **__: pytest.fail("blank tab should be reused before creating a new CDP target"),
-    )
+
+    def fake_put(url: str, **_kwargs):
+        calls.append(url)
+        return Response()
+
+    monkeypatch.setattr(cdp.httpx_client, "put", fake_put)
 
     page = cdp.find_or_create_notebooklm_page_by_cdp_url("http://127.0.0.1:9223")
 
-    assert page is pages[0]
-    assert navigated == [("ws://127.0.0.1:9223/devtools/page/blank", cdp.NOTEBOOKLM_URL)]
+    assert page is not None
+    assert page["url"] == "https://notebook.google.com/"
+    assert calls and calls[0].startswith("http://127.0.0.1:9223/json/new?")
+    assert navigated == []
 
 
 def test_extract_cookies_via_cdp_reports_chrome_handoff(monkeypatch) -> None:
