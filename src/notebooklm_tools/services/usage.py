@@ -10,7 +10,8 @@ from datetime import UTC, datetime
 
 from ..core.client import NotebookLMClient
 from ..core.usage import USAGE_WINDOW_ROLLING, USAGE_WINDOW_WEEKLY
-from .errors import ServiceError
+from .auth import AuthManager
+from .errors import ServiceError, ValidationError
 
 _WINDOW_NAMES = {
     USAGE_WINDOW_ROLLING: "rolling",
@@ -21,6 +22,34 @@ _WINDOW_NAMES = {
 # keep it deterministic for anyone parsing it. Shortest window first, since that
 # is the one that blocks work soonest. Unknown windows sort last.
 _WINDOW_ORDER = ["rolling", "weekly"]
+
+
+def get_usage_for_profile(profile: str) -> dict:
+    """Read usage with an isolated, short-lived client for a saved account.
+
+    Never falls back to environment cookies or another profile, and never
+    changes the configured default or the MCP server's shared client.
+    """
+    if not profile.strip() or profile in {".", ".."} or any(c in profile for c in "/\\\x00"):
+        raise ValidationError("Profile must be a saved profile name, not a path.")
+    try:
+        saved = AuthManager(profile).load_profile()
+        with NotebookLMClient(
+            cookies=saved.cookies,
+            csrf_token=saved.csrf_token or "",
+            session_id=saved.session_id or "",
+            build_label=saved.build_label or "",
+            base_host=saved.base_host or "",
+            profile_name=profile,
+        ) as client:
+            return get_usage(client)
+    except ServiceError:
+        raise
+    except Exception as exc:
+        raise ServiceError(
+            f"Could not read usage for profile '{profile}': {exc}",
+            hint="Run 'nlm login profile list' to check saved accounts, then log in to the requested profile.",
+        ) from exc
 
 
 def _to_iso(epoch_seconds: int | None) -> str | None:

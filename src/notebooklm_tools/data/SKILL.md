@@ -195,6 +195,12 @@ Call `usage_get()` for a read-only account-level usage report. It returns:
 - `resets_at`: ISO 8601 UTC reset timestamp
 - `tier`: subscription tier when available
 
+To check separate accounts, call `usage_get(profile="work")` and
+`usage_get(profile="personal")` using their saved profile names. Each call
+uses that account without switching the default or affecting other MCP tools.
+An explicit profile overrides `NOTEBOOKLM_COOKIES`; a missing profile returns
+an error instead of falling back to another account.
+
 The API may return windows in either order, so consumers should use the window
 name. If the usage request fails with an authentication error, refresh with
 `nlm auth refresh` or `nlm login`; do not interpret the failure as zero quota.
@@ -204,6 +210,8 @@ name. If the usage request fails with an authentication error, refresh with
 ```bash
 nlm usage                 # Human-readable table in the local timezone
 nlm usage --json          # Machine-readable JSON; reset timestamps stay in UTC
+nlm usage --profile work  # Check work without changing the default account
+nlm usage -p personal    # Check personal separately
 ```
 
 Use this check before quota-limited chat or Studio work when the remaining
