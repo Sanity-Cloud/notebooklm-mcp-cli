@@ -110,8 +110,14 @@ def get_usage(client: NotebookLMClient) -> dict:
     if not raw_windows:
         raise ServiceError(
             "Usage response contained no windows",
-            user_message="Gemini Notebook returned no usage information.",
-            hint="The response shape may have changed. Re-run with --debug to inspect it.",
+            user_message=(
+                "Gemini Notebook returned no usage information. "
+                "Usage data may be unavailable for Enterprise/Workspace accounts."
+            ),
+            hint=(
+                "For CLI troubleshooting, run 'nlm --debug usage'. "
+                "For MCP, start the server with 'notebooklm-mcp --debug'."
+            ),
         )
 
     try:
