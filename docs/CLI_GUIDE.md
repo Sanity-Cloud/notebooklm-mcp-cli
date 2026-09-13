@@ -250,6 +250,17 @@ nlm chat configure <notebook> --goal learning_guide --length longer
 nlm chat configure <notebook> --goal custom --prompt "You are an expert..."
 ```
 
+### Plan Usage
+
+```bash
+nlm usage                         # Use the configured default profile
+nlm usage --profile work          # Inspect a named profile without switching defaults
+nlm usage -p personal --json      # Short profile flag with JSON output
+```
+
+`--profile` selects credentials only for this usage check; it does not change
+`auth.default_profile`.
+
 ### Configuration
 
 ```bash
