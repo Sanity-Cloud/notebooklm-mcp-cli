@@ -259,7 +259,9 @@ nlm usage -p personal --json      # Short profile flag with JSON output
 ```
 
 `--profile` selects credentials only for this usage check; it does not change
-`auth.default_profile`.
+`auth.default_profile`. An explicit profile takes priority over
+`NOTEBOOKLM_COOKIES`. Without `--profile`, environment cookies still take
+priority over the configured default account.
 
 ### Configuration
 
@@ -278,7 +280,7 @@ nlm config set output.format json       # Change default output format
 | `output.color`         | `true`    | Enable colored output                                                                                                                                                                              |
 | `output.short_ids`     | `true`    | Show shortened IDs                                                                                                                                                                                 |
 | `auth.browser`         | `auto`    | Preferred browser for login (auto, chrome, arc, brave, edge, chromium, firefox, vivaldi, opera). Falls back to auto if the preferred browser is not found.                                         |
-| `auth.default_profile` | `default` | Profile to use when `--profile` not specified. **Note:** The MCP Server always uses the active default profile. Changing this setting will instantaneously switch the MCP server's Google account. |
+| `auth.default_profile` | `default` | Profile to use when `--profile` not specified. **Note:** MCP tools use the active default profile unless environment cookies or an explicit per-call profile (supported by `usage_get`) select another account. |
 
 ### Aliases (Shortcuts)
 

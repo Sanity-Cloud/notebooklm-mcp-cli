@@ -2,7 +2,7 @@
 
 from ...services import ServiceError
 from ...services import usage as usage_service
-from ._utils import ResultDict, create_profile_client, error_result, get_client, logged_tool
+from ._utils import ResultDict, error_result, get_client, logged_tool
 
 
 @logged_tool()
@@ -14,18 +14,17 @@ def usage_get(profile: str | None = None) -> ResultDict:
     used, the percentage remaining and the reset time in UTC.
 
     Args:
-        profile: Optional authentication profile. Uses the configured default when omitted.
+        profile: Saved account profile, e.g. "work" or "personal". Overrides
+            environment cookies for this call without switching the default
+            account. Omit to use the MCP server's current authentication.
     """
-    client = None
-    explicit_profile = profile is not None
     try:
-        client = create_profile_client(profile) if explicit_profile else get_client()
-        result = usage_service.get_usage(client)
+        if profile is not None:
+            result = usage_service.get_usage_for_profile(profile)
+        else:
+            result = usage_service.get_usage(get_client())
         return {"status": "success", **result}
     except ServiceError as e:
         return error_result(e.user_message, hint=e.hint)
     except Exception as e:
         return error_result(str(e))
-    finally:
-        if explicit_profile and client is not None:
-            client.close()

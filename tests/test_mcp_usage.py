@@ -1,78 +1,53 @@
-"""Tests for profile-aware MCP usage reporting."""
+"""Profile selection must not switch the MCP server's shared account."""
 
-import asyncio
 from unittest.mock import MagicMock, patch
 
-from notebooklm_tools.mcp.server import mcp
-from notebooklm_tools.mcp.tools.usage import usage_get
+from notebooklm_tools.mcp.tools import _utils, usage
+from notebooklm_tools.services.auth import AuthManager
+from notebooklm_tools.utils.config import get_config
 
 
-def _usage_for(client):
-    return {"windows": [], "tier": client.test_label}
+def test_named_usage_profiles_are_isolated_and_closed(monkeypatch):
+    for profile in ("work", "personal"):
+        AuthManager(profile).save_profile(cookies={"SID": profile}, csrf_token=f"{profile}-csrf")
+    monkeypatch.setenv("NOTEBOOKLM_COOKIES", "SID=environment")
+    shared_client = MagicMock()
+    monkeypatch.setattr(_utils, "_client", shared_client)
+    default_profile = get_config().auth.default_profile
+    clients = []
 
+    def read_usage(client):
+        clients.append(client)
+        return {"windows": [], "tier": client.cookies["SID"]}
 
-def test_usage_get_accepts_explicit_profile():
-    client = MagicMock(name="secondary")
-    client.test_label = "secondary"
     with (
-        patch("notebooklm_tools.mcp.tools.usage.create_profile_client", return_value=client) as create_profile_client,
-        patch("notebooklm_tools.mcp.tools.usage.usage_service.get_usage", side_effect=_usage_for),
+        patch("notebooklm_tools.services.usage.get_usage", side_effect=read_usage),
+        patch("notebooklm_tools.core.client.NotebookLMClient.close") as close,
     ):
-        result = usage_get(profile="secondary")
-
-    assert result["status"] == "success"
-    assert result["tier"] == "secondary"
-    create_profile_client.assert_called_once_with("secondary")
-
-
-def test_usage_get_without_profile_keeps_default_client_behavior():
-    client = MagicMock(name="default")
-    client.test_label = "default"
-    with (
-        patch("notebooklm_tools.mcp.tools.usage.get_client", return_value=client) as get_client,
-        patch("notebooklm_tools.mcp.tools.usage.usage_service.get_usage", side_effect=_usage_for),
-    ):
-        result = usage_get()
-
-    assert result["status"] == "success"
-    assert result["tier"] == "default"
-    get_client.assert_called_once_with()
+        assert usage.usage_get(profile="work")["tier"] == "work"
+        assert usage.usage_get(profile="personal")["tier"] == "personal"
+    assert [client._profile_name for client in clients] == ["work", "personal"]
+    assert close.call_count == 2
+    assert _utils._client is shared_client
+    assert get_config().auth.default_profile == default_profile
 
 
-def test_usage_get_keeps_explicit_profiles_isolated():
-    clients = {"alpha": MagicMock(name="alpha"), "beta": MagicMock(name="beta")}
-    clients["alpha"].test_label = "alpha"
-    clients["beta"].test_label = "beta"
-    with (
-        patch(
-            "notebooklm_tools.mcp.tools.usage.create_profile_client",
-            side_effect=lambda profile: clients[profile],
-        ) as create_profile_client,
-        patch("notebooklm_tools.mcp.tools.usage.get_client") as get_default_client,
-        patch("notebooklm_tools.mcp.tools.usage.usage_service.get_usage", side_effect=_usage_for),
-    ):
-        results = [usage_get(profile=name)["tier"] for name in ("alpha", "beta", "alpha")]
-
-    assert results == ["alpha", "beta", "alpha"]
-    assert [call.args[0] for call in create_profile_client.call_args_list] == ["alpha", "beta", "alpha"]
-    get_default_client.assert_not_called()
-
-
-def test_usage_get_missing_profile_returns_structured_error():
-    with patch(
-        "notebooklm_tools.mcp.tools.usage.create_profile_client",
-        side_effect=ValueError("Profile 'missing' not found"),
-    ):
-        result = usage_get(profile="missing")
-
+def test_missing_profile_returns_error_without_using_shared_client(monkeypatch):
+    monkeypatch.setenv("NOTEBOOKLM_COOKIES", "SID=environment")
+    with patch.object(usage, "get_client") as shared:
+        result = usage.usage_get(profile="missing")
     assert result["status"] == "error"
-    assert result["error"] == "Profile 'missing' not found"
+    assert "missing" in result["error"]
+    shared.assert_not_called()
 
 
-def test_usage_get_schema_advertises_optional_profile():
-    tool = asyncio.run(mcp.get_tool("usage_get"))
-
-    assert tool is not None
-    profile_schema = tool.parameters["properties"]["profile"]
-    assert "profile" not in tool.parameters.get("required", [])
-    assert {entry.get("type") for entry in profile_schema["anyOf"]} == {"string", "null"}
+def test_default_usage_preserves_shared_client():
+    with (
+        patch.object(usage, "get_client") as shared,
+        patch(
+            "notebooklm_tools.services.usage.get_usage", return_value={"windows": [], "tier": None}
+        ) as read,
+    ):
+        assert usage.usage_get()["status"] == "success"
+    read.assert_called_once_with(shared.return_value)
+    shared.return_value.close.assert_not_called()
