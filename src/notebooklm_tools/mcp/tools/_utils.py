@@ -164,6 +164,22 @@ def set_query_timeout(timeout: float) -> None:
     _query_timeout = timeout
 
 
+def create_profile_client(profile: str) -> NotebookLMClient:
+    """Create an isolated client for one explicitly named auth profile."""
+    cached = load_cached_tokens(profile_name=profile)
+    if cached is None:
+        raise ValueError(f"Profile '{profile}' not found. Run 'nlm login --profile {profile}' first.")
+
+    return NotebookLMClient(
+        cookies=cached.cookies,
+        csrf_token=cached.csrf_token,
+        session_id=cached.session_id,
+        build_label=cached.build_label or "",
+        base_host=cached.base_host or "",
+        profile_name=profile,
+    )
+
+
 def get_client() -> NotebookLMClient:
     """Get or create the API client (thread-safe).
 
