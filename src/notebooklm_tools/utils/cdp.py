@@ -2068,6 +2068,34 @@ def cleanup_chrome_profile_cache(profile_name: str = "default") -> int:
     return bytes_freed
 
 
+def _validate_headless_candidate(tokens: "Any", profile_name: str) -> bool:
+    """Prove extracted browser credentials work before replacing the profile cache."""
+    from notebooklm_tools.core.client import NotebookLMClient
+
+    client = NotebookLMClient(
+        cookies=tokens.cookies,
+        csrf_token=tokens.csrf_token,
+        session_id=tokens.session_id,
+        build_label=tokens.build_label or "",
+        base_host=tokens.base_host or "",
+        profile_name=profile_name,
+    )
+    try:
+        # Call the same read-only RPC as list_notebooks, but mark auth recovery
+        # exhausted so an invalid candidate cannot recursively launch headless auth.
+        client._call_rpc(
+            client.RPC_LIST_NOTEBOOKS,
+            [None, 1, None, [2]],
+            _retry=True,
+            _deep_retry=True,
+        )
+        return True
+    except Exception:
+        return False
+    finally:
+        client.close()
+
+
 def run_headless_auth(
     port: int = 9223,
     timeout: int = 30,
@@ -2099,15 +2127,18 @@ def run_headless_auth(
     chrome_was_running = False
 
     try:
-        # Try to connect only to a profile-owned existing Chrome first.
+        # A Chrome user-data-dir may only have one owning browser process.
+        # Reuse any live browser for this NLM profile, even when it is the
+        # broker's visible interactive browser on a different CDP port. Trying
+        # to launch the same profile again can hand off to the existing process
+        # and make cleanup kill the browser that is waiting for user sign-in.
         existing_port, debugger_url = find_existing_nlm_chrome(
-            port_range=range(port, port + 1),
             profile_name=profile_name,
             include_headless=True,
         )
 
         if existing_port is not None and debugger_url:
-            # Chrome already running for this profile - use existing instance
+            # Chrome already owns this profile - consume its live session.
             port = existing_port
             chrome_was_running = True
         else:
@@ -2164,7 +2195,8 @@ def run_headless_auth(
         session_id = extract_session_id(html)
         base_host = urlparse(current_url).hostname or ""
 
-        # Create and save tokens
+        # Build a candidate first. Do not replace the profile cache until an
+        # authenticated NotebookLM RPC proves these browser credentials work.
         tokens = AuthTokens(
             cookies=cookies_list,
             csrf_token=csrf_token or "",
@@ -2172,6 +2204,9 @@ def run_headless_auth(
             base_host=base_host,
             extracted_at=time.time(),
         )
+        if not _validate_headless_candidate(tokens, profile_name):
+            return None
+
         save_tokens_to_cache(
             tokens,
             profile_name=profile_name,
@@ -2193,4 +2228,9 @@ def run_headless_auth(
         # Clean that tree only after proving the profile has no usable CDP listener.
         if chrome_process and not chrome_was_running:
             terminate_chrome(chrome_process, port)
+            # On Windows the launcher may hand off to a child Chrome process.
+            # terminate_chrome() can then reap only the launcher while the
+            # profile-owning CDP listener survives. Close that listener only
+            # after proving it still owns this exact NLM profile and port.
+            close_profile_owned_cdp_browser(_cdp_http_base(port), profile_name)
             cleanup_orphaned_profile_browsers(profile_name)

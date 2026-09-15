@@ -15,6 +15,36 @@ from ._utils import (
 )
 
 
+def _broker_headless_cdp_port(profile_name: str) -> int | None:
+    """Return the auth broker's reserved headless port for a managed profile."""
+    enabled = os.environ.get("NOTEBOOKLM_AUTH_BROKER_ENABLED", "true").strip().lower()
+    if enabled in {"0", "false", "no", "off"}:
+        return None
+
+    profiles_raw = os.environ.get("NOTEBOOKLM_AUTH_BROKER_PROFILES", "")
+    broker_profile = os.environ.get("NOTEBOOKLM_AUTH_BROKER_PROFILE", "").strip()
+    broker_markers = profiles_raw or broker_profile or os.environ.get("NOTEBOOKLM_AUTH_BROKER_CDP_PORT")
+    if not broker_markers:
+        return None
+
+    profiles = [value.strip() for value in profiles_raw.split(",") if value.strip()]
+    if profiles:
+        if profile_name not in profiles:
+            return None
+        index = profiles.index(profile_name)
+    elif broker_profile and profile_name != broker_profile:
+        return None
+    else:
+        index = 0
+
+    try:
+        base = int(os.environ.get("NOTEBOOKLM_AUTH_BROKER_HEADLESS_CDP_PORT", "9224"))
+        stride = int(os.environ.get("NOTEBOOKLM_AUTH_BROKER_CDP_PORT_STRIDE", "2"))
+    except ValueError:
+        return None
+    return base + (index * stride)
+
+
 @logged_tool()
 def refresh_auth() -> ResultDict:
     """Reload auth tokens from disk or run headless re-authentication.
@@ -63,7 +93,11 @@ def refresh_auth() -> ResultDict:
             from notebooklm_tools.utils.config import get_config
 
             profile_name = get_config().auth.default_profile
-            tokens = run_headless_auth(profile_name=profile_name)
+            headless_port = _broker_headless_cdp_port(profile_name)
+            if headless_port is None:
+                tokens = run_headless_auth(profile_name=profile_name)
+            else:
+                tokens = run_headless_auth(profile_name=profile_name, port=headless_port)
             if tokens:
                 reset_client()
                 get_client()

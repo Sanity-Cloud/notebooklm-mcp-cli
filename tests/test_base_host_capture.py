@@ -12,12 +12,18 @@ from notebooklm_tools.utils import cdp
 
 
 class TestRunHeadlessAuthCapturesBaseHost:
-    def _run_with_current_url(self, current_url: str, profile_name: str = "default"):
+    def _run_with_current_url(
+        self,
+        current_url: str,
+        profile_name: str = "default",
+        *,
+        valid_candidate: bool = True,
+    ):
         with (
             patch.object(cdp, "has_chrome_profile", return_value=True),
             patch.object(
                 cdp, "find_existing_nlm_chrome", return_value=(9223, "ws://127.0.0.1:9223")
-            ),
+            ) as mock_find_existing,
             patch.object(
                 cdp,
                 "find_or_create_notebooklm_page",
@@ -39,9 +45,19 @@ class TestRunHeadlessAuthCapturesBaseHost:
             patch.object(cdp, "extract_session_id", return_value="sid"),
             patch.object(cdp, "extract_email", return_value="user@example.com"),
             patch.object(cdp, "cleanup_chrome_profile_cache", return_value=0),
+            patch.object(
+                cdp,
+                "_validate_headless_candidate",
+                return_value=valid_candidate,
+                create=True,
+            ),
             patch("notebooklm_tools.core.auth.save_tokens_to_cache") as mock_save,
         ):
             tokens = cdp.run_headless_auth(profile_name=profile_name)
+            mock_find_existing.assert_called_once_with(
+                profile_name=profile_name,
+                include_headless=True,
+            )
             return tokens, mock_save
 
     def test_base_host_captured_on_rebrand_host(self):
@@ -74,3 +90,13 @@ class TestRunHeadlessAuthCapturesBaseHost:
             profile_name="tsm",
             email="user@example.com",
         )
+
+    def test_rpc_invalid_headless_candidate_is_not_cached_or_returned(self):
+        tokens, mock_save = self._run_with_current_url(
+            "https://notebook.google.com/",
+            profile_name="harmonywave13",
+            valid_candidate=False,
+        )
+
+        assert tokens is None
+        mock_save.assert_not_called()

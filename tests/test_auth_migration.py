@@ -237,11 +237,17 @@ class TestCDPStartupHandling:
             pass
 
         cleanup_calls: list[str] = []
+        close_calls: list[tuple[str, str]] = []
         monkeypatch.setattr(cdp, "has_chrome_profile", lambda _profile: True)
         monkeypatch.setattr(cdp, "find_existing_nlm_chrome", lambda **_kwargs: (None, None))
         monkeypatch.setattr(cdp, "launch_chrome_process", lambda *_args, **_kwargs: FakeProcess())
         monkeypatch.setattr(cdp, "get_debugger_url", lambda *_args, **_kwargs: None)
         monkeypatch.setattr(cdp, "terminate_chrome", lambda *_args, **_kwargs: True)
+        monkeypatch.setattr(
+            cdp,
+            "close_profile_owned_cdp_browser",
+            lambda cdp_url, profile_name: close_calls.append((cdp_url, profile_name)) or True,
+        )
         monkeypatch.setattr(
             cdp,
             "cleanup_orphaned_profile_browsers",
@@ -252,6 +258,7 @@ class TestCDPStartupHandling:
         result = cdp.run_headless_auth(port=9224, timeout=1, profile_name="pte")
 
         assert result is None
+        assert close_calls == [("http://127.0.0.1:9224", "pte")]
         assert cleanup_calls == ["pte"]
 
     def test_orphan_cleanup_terminates_managed_profile_without_live_cdp(
