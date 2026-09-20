@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.6] - 2026-09-20
+
+Patch release restoring scalar source mutations for MCP clients that serialize
+optional null list parameters as string sentinels.
+
+### Fixed
+
+- **Claude Desktop null-list compatibility** — Optional string-list parameters
+  now recognize `"null"` and `["null"]` as absent. This
+  prevents `source_add(url=...)` and `source_delete(source_id=...)` from taking
+  the bulk-operation path and ignoring the valid scalar argument
+  ([issue #331](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/331)).
+  Thanks to **@ggnoobpvp** for isolating the scalar-versus-list behavior.
+
+### Verification
+
+- Live FastMCP stdio calls against the real provider succeeded for scalar add
+  and delete with both `"null"` and `["null"]` list sentinels.
+- Full suite: 1,617 passed, 39 skipped. Ruff lint and formatting clean.
+
 ## [0.11.5] - 2026-09-17
 
 Patch release hardening the headless auth refresh and account switching.
