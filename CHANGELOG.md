@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.7] - 2026-09-22
+
+Patch release fixing verb commands that called Typer handlers directly and
+leaked unset option defaults.
+
+### Fixed
+
+- **Verb commands crashed or ignored real defaults** — `nlm list artifacts` and
+  `nlm status artifacts` raised `TypeError` because `limit` arrived as a Typer
+  `OptionInfo` instead of a number. `nlm create notebook` always printed JSON,
+  and `nlm set alias` skipped type detection, for the same reason. The URL and
+  text add verbs now pass their unused defaults explicitly too.
+  ([issue #333](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/333)).
+  Thanks to **@hkrathore** for the traceback and the call-site diagnosis.
+
+### Verification
+
+- `nlm list artifacts` and `nlm status artifacts` reach the status service
+  without a `TypeError`. `nlm studio status` was already fine.
+- Full suite, excluding the e2e marker: 1,624 passed, 38 skipped. Ruff lint
+  and formatting clean.
+
 ## [0.11.6] - 2026-09-20
 
 Patch release restoring scalar source mutations for MCP clients that serialize
