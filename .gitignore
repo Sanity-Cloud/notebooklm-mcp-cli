@@ -93,6 +93,10 @@ notebooklm-mcp-*.mcpb
 
 # Local ad-hoc test scripts
 scratch/
+.local/
+
+# Generated Graphify code graph/cache
+graphify-out/
 
 # PR diff/patch scratch files
 *.diff
