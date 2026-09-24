@@ -23,7 +23,9 @@ def _broker_headless_cdp_port(profile_name: str) -> int | None:
 
     profiles_raw = os.environ.get("NOTEBOOKLM_AUTH_BROKER_PROFILES", "")
     broker_profile = os.environ.get("NOTEBOOKLM_AUTH_BROKER_PROFILE", "").strip()
-    broker_markers = profiles_raw or broker_profile or os.environ.get("NOTEBOOKLM_AUTH_BROKER_CDP_PORT")
+    broker_markers = (
+        profiles_raw or broker_profile or os.environ.get("NOTEBOOKLM_AUTH_BROKER_CDP_PORT")
+    )
     if not broker_markers:
         return None
 

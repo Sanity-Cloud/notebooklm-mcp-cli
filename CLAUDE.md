@@ -79,6 +79,7 @@ save_auth_tokens(cookies=<cookie_header>)
 | `NOTEBOOKLM_BL` | No | Override for build label / bl URL param (auto-extracted from page) |
 | `NOTEBOOKLM_HL` | No | Interface language and default artifact language (default: `en`) |
 | `NOTEBOOKLM_RPC_OVERRIDES` | No | Hot-patch rotated batchexecute RPC method IDs without a release. JSON object mapping `BaseClient` RPC attribute names to new IDs, e.g. `{"RPC_LIST_NOTEBOOKS": "abc123"}` |
+| `NOTEBOOKLM_DISABLE_HEADLESS_REFRESH` | No | Set to `1` to disable the automatic headless self-heal and `nlm auth refresh`. Use on Google Workspace accounts whose session is revoked when the saved browser profile is relaunched (issue #330) |
 
 ### Resilience: rotated RPC IDs
 
