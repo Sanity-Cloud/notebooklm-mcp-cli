@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from typer.testing import CliRunner
@@ -18,6 +19,7 @@ from notebooklm_tools.cli.commands.setup import (
     _is_already_configured,
     _remove_single,
     _setup_claude_desktop,
+    _without_own_process_ancestry,
     app,
 )
 
@@ -220,6 +222,34 @@ class TestClaudeDesktopProcessDetection:
         assert _claude_desktop_profile_is_running("3p", process_list=process_list) is False
         assert _claude_desktop_profile_is_running("regular", process_list=process_list) is False
 
+    def test_own_nlm_invocation_is_not_treated_as_desktop(self):
+        ps_output = (
+            "    1     0 /sbin/launchd\n"
+            "  500     1 /bin/zsh -c nlm setup add claude-desktop\n"
+            "  501   500 /Users/test/.local/bin/python3 /Users/test/.local/bin/nlm "
+            "setup add claude-desktop\n"
+            "  502   501 ps -axo pid=,ppid=,command=\n"
+        )
+        process_list = _without_own_process_ancestry(ps_output, own_pid=501)
+        assert "claude-desktop" not in process_list
+        assert _claude_desktop_profile_is_running("regular", process_list=process_list) is False
+
+    def test_keeps_unrelated_desktop_and_desktop_ancestor(self):
+        ps_output = (
+            "    1     0 /sbin/launchd\n"
+            "  400     1 /Applications/Claude.app/Contents/MacOS/Claude\n"
+            "  500   400 /bin/zsh -c nlm setup add claude-desktop\n"
+            "  501   500 /Users/test/.local/bin/python3 /Users/test/.local/bin/nlm "
+            "setup add claude-desktop\n"
+            "  600     1 /usr/bin/claude-desktop --no-sandbox\n"
+        )
+        process_list = _without_own_process_ancestry(ps_output, own_pid=501)
+        assert process_list.splitlines() == [
+            "/Applications/Claude.app/Contents/MacOS/Claude",
+            "/usr/bin/claude-desktop --no-sandbox",
+        ]
+        assert _claude_desktop_profile_is_running("regular", process_list=process_list) is True
+
 
 class TestSetupClaudeDesktop:
     """Test ``_setup_claude_desktop()`` writes the correct config format."""
@@ -337,8 +367,8 @@ class TestSetupClaudeDesktop:
                 return_value="/usr/local/bin/notebooklm-mcp",
             ),
             patch(
-                "notebooklm_tools.cli.commands.setup.Prompt.ask",
-                return_value="3",
+                "notebooklm_tools.cli.commands.setup.questionary.select",
+                return_value=SimpleNamespace(ask=lambda: "both"),
             ) as prompt,
         ):
             result = _setup_claude_desktop()

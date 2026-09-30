@@ -21,6 +21,7 @@ VALID_ARTIFACT_TYPES = (
     "audio",
     "video",
     "report",
+    "interactive_report",
     "mind_map",
     "slide_deck",
     "infographic",
@@ -44,6 +45,7 @@ DEFAULT_EXTENSIONS = {
     "audio": "m4a",
     "video": "mp4",
     "report": "md",
+    "interactive_report": "md",
     "mind_map": "json",
     "slide_deck": "pdf",
     "infographic": "png",
@@ -418,10 +420,10 @@ async def _download_once_async(
             raise ServiceError(
                 f"Failed to download {artifact_type}: {e}",
                 user_message=(
-                    f"{artifact_type.title()} is complete, but its download is still propagating. "
-                    "Try again shortly."
+                    f"{artifact_type.title()} is complete, but its media may still be "
+                    "propagating or may be unavailable."
                 ),
-                hint="Retry the download after a short delay.",
+                hint="Retry later; if the 404 persists, verify artifact access.",
                 debug_code="artifact_not_ready",
             ) from e
         raise ServiceError(
@@ -474,7 +476,8 @@ async def download_async(
         progress_callback: Called with (current, total) for progress tracking
         slide_deck_format: For slide_deck only: "pdf" (default) or "pptx"
         wait: Poll while the artifact download is still propagating
-        wait_timeout: Maximum seconds to wait when ``wait`` is enabled
+        wait_timeout: Service polling budget when ``wait`` is enabled; internal
+            CDN retries and the file transfer can extend total wall time
         poll_interval: Seconds between readiness checks
 
     Returns:
@@ -898,7 +901,7 @@ def _dispatch_sync(
     output_format: str,
 ) -> str:
     """Route to the correct synchronous client method."""
-    if artifact_type == "report":
+    if artifact_type in ("report", "interactive_report"):
         return client.download_report(notebook_id, output_path, artifact_id)
     elif artifact_type == "mind_map":
         return client.download_mind_map(notebook_id, output_path, artifact_id)
@@ -943,7 +946,7 @@ async def _dispatch_async(
 ) -> str:
     """Route to the correct async client method."""
     # Non-streaming types (sync client methods callable from async context)
-    if artifact_type == "report":
+    if artifact_type in ("report", "interactive_report"):
         return await _resolve_download_result(
             client.download_report(notebook_id, output_path, artifact_id)
         )

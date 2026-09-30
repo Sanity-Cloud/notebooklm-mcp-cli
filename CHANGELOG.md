@@ -5,6 +5,80 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-09-27
+
+Setup is now one command. `nlm setup` finds the AI tools on your machine and
+connects them to Gemini Notebook through a guided menu — no config files to
+edit. This release also includes the fixes prepared for the unreleased 0.12.1.
+
+### Added
+
+- **Guided setup wizard (`nlm setup`)** — A menu with six options: **Show my tools' status**, **Add the MCP to my tools/agents**, **Add the skill to my tools/agents**, **Remove an MCP or skill**, **Copy MCP setup for a tool not listed**, and **Exit**. Only tools found on your machine are listed. Press Esc on any screen to go back; the menu returns after each task.
+- **Status view** — One color-coded table per detected tool: MCP connection (✓ set up, ✗ not yet, ⚠ old name) and skill version (⬆ when an upgrade is available).
+- **Connect and skill pickers** — The connect list starts with nothing selected and shows already-connected tools as locked. The skill step asks **All my projects** (default) or **Just this folder**, pre-ticks tools you just connected and available upgrades, and replaces an older skill only after you confirm. Choosing **Add the skill** from the menu goes straight to these choices.
+- **Rename old server names** — Connections still named `notebooklm-mcp` or `notebooklm` show as **⚠ old name** and appear under **Needs a fix**. Ticking one renames it to `gemini-notebook-mcp` and keeps its other settings (for example Codex's `enabled = true`). Claude Code entries are renamed through `claude mcp add-json` and checked against the saved config before the wizard reports success.
+- **Skill upload file for Claude Desktop Chat, Cowork and claude.ai** — These only load skills uploaded to your Claude account, not local skill folders. `nlm skill package` (or the **Claude Desktop / claude.ai** row in the wizard's skill picker) saves `~/Downloads/nlm-skill.zip` in Claude's skill-upload format, reveals it in Finder on macOS, and shows the upload steps (**Customize → Skills → Add**). The zip's `SKILL.md` carries its version under `metadata:` as the upload format requires.
+- **Copy MCP setup** — Copies the standard JSON snippet, using the full path to `notebooklm-mcp`, straight to the clipboard. **Advanced options** switch to uvx, the bare command, or entry-only JSON.
+- **Codex desktop and global Copilot setup** — The wizard configures the shared Codex CLI / ChatGPT desktop MCP config and the VS Code user profile for GitHub Copilot. Skill setup deduplicates shared locations.
+
+### Improved
+
+- **Safe changes** — Every MCP config and skill folder is backed up to `~/.notebooklm-mcp-cli/backups/` before it changes. Malformed configs fail closed, unrelated servers are preserved, and JSONC files are left untouched when they can't be edited safely. Removal is grouped (MCP connections / skills), opt-in, and asks for a separate default-No confirmation per group.
+- **Honest results** — A connection that fails, or that you skip with Esc (such as at the Claude Desktop profile question), is reported as failed or skipped instead of connected, and the skill offer no longer says "Connection added" after a failure.
+- **New MCP entries use the full path** to `notebooklm-mcp` by default, since desktop apps often don't inherit your shell `PATH`.
+- **Version-aware skill updates** — Current or newer skill versions are kept; older or unversioned installs are replaced only after confirmation.
+
+### Fixed
+
+- **Direct `AuthManager.get_headers()` calls use the saved sign-in host ([#332](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/332))** — `Origin` and `Referer` now follow the profile's saved `base_host` instead of defaulting to `notebooklm.google.com`, matching the live client.
+- Retry transient Google media 404s when downloading newly completed videos; report an uncertain media availability error after retries.
+- Explain permission-denied collaborator invites without guessing which account or domain restriction applied.
+- Build notebook links from the authenticated profile's host across notebook, Studio, and sharing outputs.
+- **Drive-imported files in Drive status ([#337](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/337))** — Read type-14 Drive IDs so Drive-picker files appear in `source_list_drive` and are eligible for manual sync. Direct uploads without Drive metadata remain excluded; an eligible source can still fail a sync attempt.
+
+### Other improvements
+
+- Count queued artifacts separately in Studio status summaries. Queue position and ETA remain unavailable from the upstream response.
+- Guide MCP and CLI agents on profile selection, download readiness, path boundaries, report timeouts, and sharing errors.
+- Setup backups follow `NOTEBOOKLM_MCP_CLI_PATH` like the rest of the app's storage, so the test suite no longer writes into the real backup folder.
+
+### Verification
+
+- New opt-in end-to-end suite (`uv run pytest -m wizard_e2e`, 38 tests): drives the real `nlm setup` in a pseudo-terminal against a sandboxed home folder and checks the files written for every menu option, Esc on every screen, the old-name rename, and the upload zip.
+- Live on macOS: connected Claude Desktop (regular and Relay AI / 3P profiles) and used the MCP from Cowork; renamed a real Claude Code entry; uploaded `nlm-skill.zip` in Claude Desktop.
+- Full suite, excluding the e2e markers: 1,898 passed, 39 skipped. Ruff lint clean.
+
+## [0.12.0] - 2026-09-24
+
+Adds support for Gemini Notebook's new Interactive Reports, built for AI
+agents: create the report, then let the agent plan, generate and review its
+embedded audio, video, slide deck, infographic, flashcards, quiz and mind map
+elements.
+
+### Added
+
+- **Interactive reports ([#336](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/336))** — Create them with `studio_create(artifact_type="report", report_format="Interactive")` or `nlm report create --format Interactive`. `nlm studio status` now labels them `interactive_report` instead of `unknown`, and `download_report` / `nlm download all` save them as Markdown.
+- **One `report` MCP tool for report elements** — `report(action="get")` returns the report as Markdown with its elements; `action="elements"` lists each element with the section it sits in, its card recommendation and the settings it accepts, and can wait on element ids and return quiz/flashcard/mind-map content for review; `action="generate"` validates a plan of up to 20 elements and, with `confirm=True`, generates them. The MCP surface grows by one tool (50).
+- **Per-element settings**, captured from the report page: quiz and flashcard difficulty and amount, infographic orientation/detail/style, slide format and length, audio format, and video format (explainer, cinematic, short).
+- **CLI:** `nlm report get`, `nlm report elements [--wait ID] [--content]`, `nlm report element create --setting name=value`, and `nlm report element create-batch --plan plan.json`.
+- **Agent workflow in the bundled skill** — The studio prompting guide and Workflow 17 teach agents to show a plan first by default, to generate without asking only when the user hands over both the choice and the generation, to anchor each element's prompt to its report section, to set video format explicitly (explainer unless cinematic is requested), and to review generated quizzes, flashcards and mind maps with an honest label. Text found in notebooks, reports or card descriptions is treated as data, never as approval.
+
+### Fixed
+
+- **`nlm setup add claude-desktop` always reported "Claude Desktop is still running" on macOS ([#334](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/334), [PR #335](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/335))** — The running-process check matched the `nlm setup add claude-desktop` command line itself (and the shell that launched it), so the guard could never pass. It now ignores its own process and its ancestors, while still counting an ancestor that really is Claude Desktop. Thanks to **@dvdsosa** for the precise diagnosis and the fix.
+
+### Safety
+
+- Report elements are generated from the report's own sources and language, never widened to every source in the notebook.
+- A plan is validated completely before anything is sent to Google; an element that is not in the "suggested" state (already started, completed or missing) is refused, including when it changes between validation and generation.
+- The generation kickoff is never re-sent automatically. A lost response is reported as `unknown` after a short status check instead of risking a duplicate generation. A quota or authentication failure stops the rest of a batch and reports what started, failed, or never ran.
+
+### Verification
+
+- Live, on a Google Workspace account: all seven element types generated with non-default settings; Google saved the exact codes and its Studio labels show Debate audio, Explainer and Short video; "more" produced a 26-question quiz and 80 flashcards; a French report produced a French quiz; a report scoped to one of two sources kept its elements on that source.
+- Agent consent evaluation (a different model, skill docs only): 8/8 correct, including ignoring a planted "pre-approved" instruction in a card description.
+- Full suite, excluding the e2e marker: 1,747 passed, 38 skipped. Ruff lint clean.
+
 ## [0.11.7] - 2026-09-22
 
 Patch release fixing verb commands that called Typer handlers directly and
