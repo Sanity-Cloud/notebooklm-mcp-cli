@@ -501,6 +501,13 @@ def test_dummy_e2e_marker():
     env = dict(subprocess.os.environ)
     env["NOTEBOOKLM_E2E"] = "1"
     env["NOTEBOOKLM_MCP_CLI_PATH"] = str(tmp_path / "storage")
+    # The outer test suite deliberately replaces HOME/USERPROFILE. Give the
+    # nested pytest process its own durable home so it never inherits an
+    # ephemeral runner directory that may disappear before child collection.
+    nested_home = tmp_path / "nested-home"
+    nested_home.mkdir()
+    env["HOME"] = str(nested_home)
+    env["USERPROFILE"] = str(nested_home)
 
     res = subprocess.run(
         [sys.executable, "-m", "pytest", str(probe_test), "-m", "e2e", "-q"],
