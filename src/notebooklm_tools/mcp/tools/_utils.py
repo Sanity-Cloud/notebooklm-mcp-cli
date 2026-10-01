@@ -241,7 +241,22 @@ def maybe_attach_mcp_notice(result: Any) -> None:
         return
     if not _mcp_probe_event.is_set() or not _mcp_probe_available:
         return
-    from notebooklm_tools.core.notices import is_mcp_notice_shown, mark_mcp_notice_shown
+    from notebooklm_tools.core.notices import (
+        get_protect_answer,
+        is_mcp_notice_shown,
+        mark_mcp_notice_shown,
+    )
+
+    # The probe looked at the profile active at server start; re-check the one active now
+    # (a profile switch may have moved us to a protected or already-answered profile).
+    try:
+        from notebooklm_tools.utils.config import get_auth_storage_mode, get_config
+
+        active = get_config().auth.default_profile
+        if get_auth_storage_mode(active) != "file" or get_protect_answer(active) is not None:
+            return
+    except Exception:
+        return
 
     if is_mcp_notice_shown():
         return
@@ -254,6 +269,35 @@ def maybe_attach_mcp_notice(result: Any) -> None:
     mark_mcp_notice_shown()
 
 
+def maybe_attach_active_profile_note(result: Any, tool_name: str) -> None:
+    """Say which account is in use while a session profile switch is active.
+
+    Only when several profiles are saved: with one profile a switch is meaningless, and
+    on the saved default there is nothing surprising to report. The server may be shared
+    by several chats, so every result carries the note until the switch is cleared.
+    """
+    if not isinstance(result, dict) or tool_name == "profile":
+        return
+    try:
+        from notebooklm_tools.services.auth_storage import saved_profile_names
+        from notebooklm_tools.utils.config import (
+            get_config,
+            get_saved_default_profile,
+            get_session_profile,
+        )
+
+        if not get_session_profile() or len(saved_profile_names()) < 2:
+            return
+        active = get_config().auth.default_profile
+        result["active_profile_note"] = (
+            f"Using profile '{active}' because of a session switch (saved default: "
+            f"'{get_saved_default_profile()}'). If the user has not been told which account "
+            "this is in this conversation, tell them."
+        )
+    except Exception:
+        return
+
+
 def get_query_timeout() -> float:
     """Get the query timeout value."""
     return _query_timeout
@@ -263,26 +307,6 @@ def set_query_timeout(timeout: float) -> None:
     """Set the query timeout value."""
     global _query_timeout
     _query_timeout = timeout
-
-
-def create_profile_client(profile: str) -> NotebookLMClient:
-    """Create an isolated client for one explicitly named auth profile."""
-    cached = load_cached_tokens(profile_name=profile)
-    if cached is None:
-        raise ValueError(
-            f"Profile '{profile}' not found. Run 'nlm login --profile {profile}' first."
-        )
-
-    return NotebookLMClient(
-        cookies=cached.cookies,
-        csrf_token=cached.csrf_token,
-        session_id=cached.session_id,
-        build_label=cached.build_label or "",
-        base_host=cached.base_host or "",
-        profile_name=profile,
-        auth_revision=cached.revision,
-        is_env_auth=False,
-    )
 
 
 def get_client() -> NotebookLMClient:
@@ -421,6 +445,21 @@ def get_mcp_instance() -> Any:
 _tool_registry: list[tuple[str, Callable[..., Any]]] = []
 
 
+def _resolve_notebook_alias(
+    sig: inspect.Signature, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Swap a notebook alias for its real ID (keyword or positional); others pass through."""
+    if "notebook_id" not in sig.parameters:
+        return args, kwargs
+    bound = sig.bind_partial(*args, **kwargs)
+    value = bound.arguments.get("notebook_id")
+    if isinstance(value, str) and value:
+        from notebooklm_tools.services.aliases import resolve
+
+        bound.arguments["notebook_id"] = resolve(value)
+    return bound.args, bound.kwargs
+
+
 def logged_tool() -> Callable[[Callable[P, Any]], Callable[P, Any]]:
     """Decorator that adds MCP request/response logging to a tool.
 
@@ -432,12 +471,14 @@ def logged_tool() -> Callable[[Callable[P, Any]], Callable[P, Any]]:
 
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
         is_async = inspect.iscoroutinefunction(func)
+        sig = inspect.signature(func)
 
         if is_async:
             async_func = cast(Callable[P, Awaitable[Any]], func)
 
             @functools.wraps(async_func)
             async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
+                args, kwargs = _resolve_notebook_alias(sig, args, kwargs)
                 tool_name = async_func.__name__
                 if mcp_logger.isEnabledFor(logging.DEBUG):
                     params = _sanitize_params({k: v for k, v in kwargs.items() if v is not None})
@@ -445,6 +486,7 @@ def logged_tool() -> Callable[[Callable[P, Any]], Callable[P, Any]]:
 
                 result: Any = await async_func(*args, **kwargs)
                 maybe_attach_mcp_notice(result)
+                maybe_attach_active_profile_note(result, tool_name)
 
                 if mcp_logger.isEnabledFor(logging.DEBUG):
                     result_str = json.dumps(_redact(result), default=str)
@@ -460,6 +502,7 @@ def logged_tool() -> Callable[[Callable[P, Any]], Callable[P, Any]]:
 
             @functools.wraps(sync_func)
             def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+                args, kwargs = _resolve_notebook_alias(sig, args, kwargs)
                 tool_name = sync_func.__name__
                 if mcp_logger.isEnabledFor(logging.DEBUG):
                     params = _sanitize_params({k: v for k, v in kwargs.items() if v is not None})
@@ -467,6 +510,7 @@ def logged_tool() -> Callable[[Callable[P, Any]], Callable[P, Any]]:
 
                 result: R = sync_func(*args, **kwargs)
                 maybe_attach_mcp_notice(result)
+                maybe_attach_active_profile_note(result, tool_name)
 
                 if mcp_logger.isEnabledFor(logging.DEBUG):
                     result_str = json.dumps(_redact(result), default=str)
