@@ -982,36 +982,8 @@ def profile_rename(
     from notebooklm_tools.core.exceptions import NLMError
     from notebooklm_tools.services.auth_storage import rename_profile
     from notebooklm_tools.services.errors import ServiceError
-    from notebooklm_tools.utils.config import get_storage_dir, validate_profile_name
 
-    # The fork keeps an isolated browser identity beside each auth profile.
-    # Validate before building paths because the upstream rename service performs
-    # its own validation only after this CLI wrapper has started.
     try:
-        validate_profile_name(old_name.strip(), strict=False)
-        validate_profile_name(new_name.strip(), strict=False)
-    except ValueError as e:
-        console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(1) from e
-
-    chrome_root = get_storage_dir() / "chrome-profiles"
-    old_chrome = chrome_root / old_name.strip()
-    new_chrome = chrome_root / new_name.strip()
-    if old_chrome.exists() and new_chrome.exists():
-        console.print(
-            f"[red]Error:[/red] Browser profile '{new_name}' already exists; "
-            "refusing to split auth and browser identity"
-        )
-        raise typer.Exit(1)
-
-    browser_moved = False
-    try:
-        # Move the browser identity first, then roll it back if upstream refuses
-        # or fails the auth-profile rename (including protected-profile guards).
-        if old_chrome.exists():
-            old_chrome.rename(new_chrome)
-            browser_moved = True
-
         result = rename_profile(old_name, new_name)
         console.print(f"[green]✓[/green] Renamed profile from '{old_name}' to '{new_name}'")
         if result["is_default"]:
@@ -1026,15 +998,6 @@ def profile_rename(
             reset_config()
             console.print(f"[green]✓[/green] Updated default profile to '{new_name}'")
     except (ServiceError, NLMError, OSError) as e:
-        if browser_moved and new_chrome.exists() and not old_chrome.exists():
-            try:
-                new_chrome.rename(old_chrome)
-            except OSError:
-                console.print(
-                    "[red]Error:[/red] Auth rename failed and the browser-profile rollback "
-                    "also failed; inspect the chrome-profiles directory before retrying."
-                )
-                raise typer.Exit(1) from e
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1) from e
 
