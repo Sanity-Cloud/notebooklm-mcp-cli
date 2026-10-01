@@ -30,6 +30,7 @@ def test_shim_reexports_expected_auth_symbols():
             "confirm_auth_via_api",
             "credentials_are_usable",
             "diagnose_auth_replay",
+            "ensure_profile_ready",
             "get_active_auth_mtime",
             "get_auth_health_checker",
             "get_cache_path",
@@ -86,16 +87,21 @@ def test_shim_load_cached_tokens_forwards_to_core(monkeypatch):
 
 
 def test_shim_save_tokens_to_cache_forwards_kwargs(monkeypatch):
-    """`save_tokens_to_cache` wrapper must forward profile-aware kwargs to
-    the core implementation.
-    """
+    """`save_tokens_to_cache` forwards the 0.14 revision-aware storage contract."""
     captured = {}
 
-    def _fake_save(tokens, silent=False, profile_name=None, email=None):
+    def _fake_save(
+        tokens,
+        silent=False,
+        profile_name=None,
+        expected_revision=None,
+        force=True,
+    ):
         captured["tokens"] = tokens
         captured["silent"] = silent
         captured["profile_name"] = profile_name
-        captured["email"] = email
+        captured["expected_revision"] = expected_revision
+        captured["force"] = force
 
     sentinel_tokens = object()
     monkeypatch.setattr(core_auth, "save_tokens_to_cache", _fake_save, raising=True)
@@ -103,13 +109,15 @@ def test_shim_save_tokens_to_cache_forwards_kwargs(monkeypatch):
         sentinel_tokens,
         silent=True,
         profile_name="work",
-        email="work@example.com",
+        expected_revision="rev-1",
+        force=False,
     )
     assert captured == {
         "tokens": sentinel_tokens,
         "silent": True,
         "profile_name": "work",
-        "email": "work@example.com",
+        "expected_revision": "rev-1",
+        "force": False,
     }
 
 
@@ -120,15 +128,27 @@ def test_shim_auth_cache_helpers_forward_explicit_profile(monkeypatch):
         captured["loaded"] = profile_name
         return "tokens"
 
-    def _fake_save(tokens, silent=False, profile_name=None, email=None):
-        captured["saved"] = (tokens, silent, profile_name, email)
+    def _fake_save(
+        tokens,
+        silent=False,
+        profile_name=None,
+        expected_revision=None,
+        force=True,
+    ):
+        captured["saved"] = (
+            tokens,
+            silent,
+            profile_name,
+            expected_revision,
+            force,
+        )
 
     monkeypatch.setattr(core_auth, "load_cached_tokens", _fake_load, raising=True)
     monkeypatch.setattr(core_auth, "save_tokens_to_cache", _fake_save, raising=True)
 
     assert services_auth.load_cached_tokens("tsm") == "tokens"
     services_auth.save_tokens_to_cache("tokens", silent=True, profile_name="tsm")
-    assert captured == {"loaded": "tsm", "saved": ("tokens", True, "tsm", None)}
+    assert captured == {"loaded": "tsm", "saved": ("tokens", True, "tsm", None, True)}
 
 
 def test_shim_validate_cookies_forwards_to_core(monkeypatch):

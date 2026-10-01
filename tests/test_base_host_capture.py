@@ -43,7 +43,6 @@ class TestRunHeadlessAuthCapturesBaseHost:
             ),
             patch.object(cdp, "extract_csrf_token", return_value="csrf"),
             patch.object(cdp, "extract_session_id", return_value="sid"),
-            patch.object(cdp, "extract_email", return_value="user@example.com"),
             patch.object(cdp, "cleanup_chrome_profile_cache", return_value=0),
             patch.object(
                 cdp,
@@ -76,7 +75,6 @@ class TestRunHeadlessAuthCapturesBaseHost:
         mock_save.assert_called_once_with(
             tokens,
             profile_name="default",
-            email="user@example.com",
         )
 
     def test_named_profile_is_preserved_when_tokens_are_cached(self):
@@ -88,7 +86,6 @@ class TestRunHeadlessAuthCapturesBaseHost:
         mock_save.assert_called_once_with(
             tokens,
             profile_name="tsm",
-            email="user@example.com",
         )
 
     def test_rpc_invalid_headless_candidate_is_not_cached_or_returned(self):

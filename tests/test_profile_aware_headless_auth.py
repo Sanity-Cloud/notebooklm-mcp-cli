@@ -16,7 +16,7 @@ def test_auth_browser_headless_dispatcher_forwards_requested_cdp_port(monkeypatc
     )
     monkeypatch.setattr(
         "notebooklm_tools.utils.cdp.run_headless_auth",
-        lambda *, port, timeout, profile_name: (
+        lambda *, port, timeout, profile_name, expected_revision=None, force=None: (
             calls.append((port, timeout, profile_name)) or object()
         ),
         raising=True,
@@ -47,7 +47,14 @@ def test_mcp_refresh_auth_uses_configured_default_profile(monkeypatch):
         raising=True,
     )
 
-    def fake_headless_auth(*, profile_name, timeout=30, port=9223):
+    def fake_headless_auth(
+        *,
+        profile_name,
+        timeout=30,
+        expected_revision=None,
+        force=False,
+        **kwargs,
+    ):
         calls.append(profile_name)
         return AuthTokens(cookies={"SID": "x"}, extracted_at=1.0)
 
@@ -89,7 +96,15 @@ def test_mcp_refresh_auth_uses_saved_profile_when_disk_tokens_are_stale(monkeypa
         raising=True,
     )
 
-    def fake_headless_auth(*, profile_name, timeout=30, port=9223):
+    def fake_headless_auth(
+        *,
+        profile_name,
+        timeout=30,
+        port=9223,
+        expected_revision=None,
+        force=None,
+        **kwargs,
+    ):
         calls.append(profile_name)
         return AuthTokens(cookies={"SID": "fresh"}, extracted_at=2.0)
 
@@ -126,7 +141,14 @@ def test_core_recovery_uses_configured_default_profile(monkeypatch):
         raising=True,
     )
 
-    def fake_headless_auth(*, profile_name, timeout=30, port=9223):
+    def fake_headless_auth(
+        *,
+        profile_name,
+        timeout=30,
+        expected_revision=None,
+        force=False,
+        **kwargs,
+    ):
         calls.append(profile_name)
         return AuthTokens(
             cookies={"SID": "x"},
@@ -153,12 +175,13 @@ def test_core_recovery_uses_configured_default_profile(monkeypatch):
 
 
 def test_mcp_refresh_auth_uses_broker_reserved_headless_port(monkeypatch):
-    """Generic MCP refresh must honor the broker's per-profile CDP allocation."""
+    """Broker-managed MCP refresh should prefer isolated headless recovery."""
     import notebooklm_tools.mcp.tools.auth as auth_tools
     from notebooklm_tools.core.auth import AuthTokens
 
     calls = []
     monkeypatch.delenv("NOTEBOOKLM_COOKIES", raising=False)
+    monkeypatch.setenv("NOTEBOOKLM_AUTH_BROKER_ENABLED", "true")
     monkeypatch.setenv("NOTEBOOKLM_AUTH_BROKER_PROFILES", "pte,harmonywave13")
     monkeypatch.setenv("NOTEBOOKLM_AUTH_BROKER_HEADLESS_CDP_PORT", "9224")
     monkeypatch.setenv("NOTEBOOKLM_AUTH_BROKER_CDP_PORT_STRIDE", "2")
