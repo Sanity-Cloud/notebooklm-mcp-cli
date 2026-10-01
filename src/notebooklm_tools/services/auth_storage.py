@@ -642,8 +642,11 @@ def rename_profile(old_name: str, new_name: str) -> RenameProfileResult:
         auth_moved = True
 
         if is_default:
+            from notebooklm_tools.utils.config import reset_config
+
             config.auth.default_profile = new_clean
             save_config(config)
+            reset_config()
     except Exception as exc:
         rollback_errors: list[str] = []
 

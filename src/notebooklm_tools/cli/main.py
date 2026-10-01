@@ -987,15 +987,6 @@ def profile_rename(
         result = rename_profile(old_name, new_name)
         console.print(f"[green]✓[/green] Renamed profile from '{old_name}' to '{new_name}'")
         if result["is_default"]:
-            # Reassert the default-profile update at the CLI boundary. The
-            # service already persists it, but this keeps the CLI contract
-            # deterministic if config state was cached before the rename.
-            from notebooklm_tools.utils.config import get_config, reset_config, save_config
-
-            config = get_config()
-            config.auth.default_profile = new_name.strip()
-            save_config(config)
-            reset_config()
             console.print(f"[green]✓[/green] Updated default profile to '{new_name}'")
     except (ServiceError, NLMError, OSError) as e:
         console.print(f"[red]Error:[/red] {e}")
