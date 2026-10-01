@@ -10,11 +10,13 @@
 
 **Programmatic access to Gemini Notebook** — via command-line interface (CLI) or Model Context Protocol (MCP) server.
 
-> 🔒 **New: Protected login storage (recommended)**
+> 🚨 **New: Protected login storage (recommended)**
 > Your saved Google login can now be encrypted, with its key kept in your computer's keychain instead of a plain file. We highly recommend everyone switch on a personal computer:
 >
 >     nlm auth storage set protected
 >
+> 💡 You can also use the 'nlm setup' wizard and select the 'Credentials Protection' option in the wizard
+> 
 > Optional: nothing changes unless you turn it on. Servers, cron, Docker and SSH setups can keep the plain file.
 > [How it works](docs/AUTHENTICATION.md#protected-storage)
 
