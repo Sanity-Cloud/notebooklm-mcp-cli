@@ -162,15 +162,19 @@ def _save_fake_profile(tmp_path, monkeypatch):
     )
 
 
-@pytest.mark.parametrize("api_result, expected_status", [
-    ((False, "ClientAuthenticationError: expired"), "stale"),
-    ((False, "network_error: ReadTimeout"), "unverified"),
-    ((True, None), "configured"),
-])
+@pytest.mark.parametrize(
+    "api_result, expected_status",
+    [
+        ((False, "ClientAuthenticationError: expired"), "stale"),
+        ((False, "network_error: ReadTimeout"), "unverified"),
+        ((True, None), "configured"),
+    ],
+)
 def test_public_homepage_does_not_prove_health(tmp_path, monkeypatch, api_result, expected_status):
     _save_fake_profile(tmp_path, monkeypatch)
     response = httpx.Response(
-        200, request=httpx.Request("GET", "https://notebook.google.com/"),
+        200,
+        request=httpx.Request("GET", "https://notebook.google.com/"),
         text='{"FdrFJe":"123","cfb2h":"public"}',
     )
     with (

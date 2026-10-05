@@ -56,7 +56,8 @@ def test_public_homepage_requires_api_confirmation(tmp_path, monkeypatch, rpc_re
     manager = AuthManager("content-work")
     manager.save_profile(cookies={"NID": "anonymous"}, csrf_token="")
     response = httpx.Response(
-        200, request=httpx.Request("GET", "https://notebook.google.com/"),
+        200,
+        request=httpx.Request("GET", "https://notebook.google.com/"),
         text='{"FdrFJe":"123","cfb2h":"public"}',
     )
     with (

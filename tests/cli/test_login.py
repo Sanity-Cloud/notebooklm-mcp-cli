@@ -29,7 +29,10 @@ def test_notebook_count_does_not_hide_authentication_rejection(monkeypatch, erro
 
     monkeypatch.setattr("notebooklm_tools.core.client.NotebookLMClient", Client)
     profile = SimpleNamespace(
-        cookies={"SID": "expired"}, csrf_token="csrf", session_id="123", build_label="build",
+        cookies={"SID": "expired"},
+        csrf_token="csrf",
+        session_id="123",
+        build_label="build",
         base_host="",
     )
     with pytest.raises(AuthenticationError):
@@ -260,7 +263,11 @@ def test_best_effort_notebook_count_swallows_timeout(monkeypatch):
 
     monkeypatch.setattr("notebooklm_tools.core.client.NotebookLMClient", FakeClient)
     profile = SimpleNamespace(
-        cookies={"SID": "sid"}, csrf_token="csrf", session_id="session", build_label="build", base_host=""
+        cookies={"SID": "sid"},
+        csrf_token="csrf",
+        session_id="session",
+        build_label="build",
+        base_host="",
     )
 
     assert _best_effort_notebook_count(profile) is None

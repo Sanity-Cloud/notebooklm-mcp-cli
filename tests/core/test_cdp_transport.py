@@ -21,7 +21,8 @@ def test_cdp_transport_preserves_saved_csrf_fallback(monkeypatch):
     monkeypatch.setattr(cdp, "has_chrome_profile", lambda profile: True)
     monkeypatch.setattr(cdp, "find_existing_nlm_chrome", lambda **kwargs: (9230, "ws://browser"))
     monkeypatch.setattr(
-        cdp, "find_or_create_notebooklm_page",
+        cdp,
+        "find_or_create_notebooklm_page",
         lambda port: {"webSocketDebuggerUrl": "ws://page"},
     )
     monkeypatch.setattr(cdp, "get_current_url", lambda ws: "https://notebook.google.com/")
