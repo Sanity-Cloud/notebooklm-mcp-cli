@@ -334,18 +334,8 @@ def extract_csrf_from_page_source(html: str) -> str | None:
     """
     import re
 
-    # Try different patterns for CSRF token
-    patterns = [
-        r'"SNlM0e":"([^"]+)"',  # WIZ_global_data.SNlM0e
-        r'at=([^&"]+)',  # Direct at= value
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, html)
-        if match:
-            return match.group(1)
-
-    return None
+    match = re.search(r'"SNlM0e":"([^"]+)"', html)
+    return match.group(1) if match else None
 
 
 def extract_session_id_from_page(html: str) -> str | None:
@@ -1104,6 +1094,8 @@ def check_auth(
         return AuthCheckResult(valid=False, reason="no_tokens", live=live, profile=profile)
 
     if not live:
+        if not validate_cookies(cookie_dict):
+            return AuthCheckResult(valid=False, reason="expired", live=False, profile=profile)
         # Pure heuristic based on last successful validation
         if p.last_validated:
             # Consider anything validated in the last 7 days as good for the

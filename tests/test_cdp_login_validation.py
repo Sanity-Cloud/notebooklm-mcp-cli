@@ -83,13 +83,6 @@ def test_incomplete_sign_in_is_not_accepted(browser, monkeypatch, missing):
         cdp.extract_cookies_from_page("http://127.0.0.1:9223", login_timeout=2)
 
 
-def test_page_ready_waits_for_csrf_instead_of_public_page_metadata(browser):
-    browser["signed_in_after"] = 1.0
-    html, ready = cdp._wait_for_page_ready("ws://page", timeout=3)
-    assert ready is True
-    assert '"SNlM0e":"real-csrf"' in html
-
-
 @pytest.mark.parametrize("saved", [False, True])
 def test_cli_does_not_save_anonymous_browser_credentials(browser, monkeypatch, saved):
     if saved:

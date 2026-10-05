@@ -260,7 +260,7 @@ def test_best_effort_notebook_count_swallows_timeout(monkeypatch):
 
     monkeypatch.setattr("notebooklm_tools.core.client.NotebookLMClient", FakeClient)
     profile = SimpleNamespace(
-        cookies={"SID": "sid"}, csrf_token="csrf", session_id="session", build_label="build"
+        cookies={"SID": "sid"}, csrf_token="csrf", session_id="session", build_label="build", base_host=""
     )
 
     assert _best_effort_notebook_count(profile) is None

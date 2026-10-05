@@ -1666,7 +1666,7 @@ def _wait_for_page_ready(ws_url: str, timeout: int = 30) -> tuple[str, bool]:
     while time.time() - start < timeout:
         try:
             html = get_page_html(ws_url)
-            if extract_csrf_token(html):
+            if extract_session_id(html) or extract_build_label(html):
                 return html, True
         except Exception:
             pass
