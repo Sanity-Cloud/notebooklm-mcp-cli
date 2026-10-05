@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The README features the latest [Claude Cowork & Interactive Reports walkthrough](https://www.youtube.com/watch?v=UXxqTpNNGt0), alongside the Codex setup demo.
+- Authentication docs and the bundled skill explain real sign-in detection, recovery with the same profile, and the distinction between CLI source URLs and the current MCP response fields.
 
 ### Removed
 
