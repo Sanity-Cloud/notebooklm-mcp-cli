@@ -338,7 +338,6 @@ def extract_csrf_from_page_source(html: str) -> str | None:
     patterns = [
         r'"SNlM0e":"([^"]+)"',  # WIZ_global_data.SNlM0e
         r'at=([^&"]+)',  # Direct at= value
-        r'"FdrFJe":"([^"]+)"',  # Alternative location
     ]
 
     for pattern in patterns:
@@ -1126,10 +1125,10 @@ def check_auth(
         final_url = str(resp.url)
         redirected_to_login = "accounts.google.com" in final_url
 
-        if not redirected_to_login and resp.status_code == 200:
+        csrf = extract_csrf_from_page_source(resp.text) or ""
+        if not redirected_to_login and resp.status_code == 200 and csrf:
             # Clean authenticated homepage: fast positive. Extract fresh CSRF
             # while we're here and record last_validated.
-            csrf = extract_csrf_from_page_source(resp.text) or ""
             manager.save_profile(
                 cookies=p.cookies,
                 csrf_token=csrf or p.csrf_token,
@@ -1146,7 +1145,7 @@ def check_auth(
                 details={"csrf_token": csrf} if csrf else None,
             )
 
-        if not redirected_to_login:
+        if not redirected_to_login and resp.status_code != 200:
             return AuthCheckResult(
                 valid=False,
                 reason=f"http_{resp.status_code}",
@@ -1154,8 +1153,8 @@ def check_auth(
                 profile=profile,
             )
 
-        # A homepage login redirect is not definitive. Some live sessions still
-        # bounce there, while the batchexecute API accepts the same cookies.
+        # A redirect or a public landing page without CSRF cannot prove auth.
+        # Some live sessions still work through the batchexecute API.
 
     except Exception as exc:
         # Network / timeout / etc. — be conservative but do not lie.
@@ -1168,8 +1167,7 @@ def check_auth(
             details={"exception": str(exc)},
         )
 
-    # Homepage bounced to login. Confirm with the RPC path real operations use
-    # before declaring the profile expired.
+    # Confirm with the RPC path real operations use before declaring expiry.
     try:
         from notebooklm_tools.core.client import NotebookLMClient
         from notebooklm_tools.core.errors import ClientAuthenticationError
