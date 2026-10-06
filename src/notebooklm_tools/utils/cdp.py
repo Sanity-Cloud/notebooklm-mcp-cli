@@ -825,6 +825,50 @@ def _find_profile_browser_pids(profile_name: str, profile_dir: Path | None = Non
     return sorted(matching_pids)
 
 
+def _find_profile_cdp_owner_pid(
+    profile_name: str,
+    port: int,
+    profile_dir: Path | None = None,
+) -> int | None:
+    """Find one root browser process for an exact managed profile and CDP port.
+
+    Windows can expose a reachable CDP endpoint while listener-PID discovery
+    returns 0/None. In that case, recover ownership from the browser command
+    line without weakening the profile boundary. Chromium child processes are
+    excluded via ``--type=...`` and ambiguity fails closed.
+    """
+    if profile_dir is None:
+        chrome_path = get_chrome_path()
+        profile_dir = (
+            _get_profile_dir_for_launch(chrome_path, profile_name)
+            if chrome_path
+            else get_chrome_profile_dir(profile_name)
+        )
+
+    expected_dir = _normalize_profile_path(profile_dir)
+    candidates: list[int] = []
+    for process_id, cmdline in _iter_process_cmdlines():
+        normalized_cmdline = cmdline.replace("\\", "/")
+        if _get_cmdline_flag_value(normalized_cmdline, "--remote-debugging-port") != str(port):
+            continue
+        user_data_dir = _get_cmdline_flag_value(normalized_cmdline, "--user-data-dir")
+        if user_data_dir is None or _normalize_profile_path(user_data_dir) != expected_dir:
+            continue
+        if _get_cmdline_flag_value(normalized_cmdline, "--type") is not None:
+            continue
+        candidates.append(process_id)
+
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _resolve_profile_cdp_owner_pid(port: int, profile_name: str) -> int | None:
+    """Resolve the exact managed browser owner, falling back only when PID lookup fails."""
+    pid = _listener_pid(port)
+    if pid not in (None, 0):
+        return pid if _mapped_chrome_owns_profile(pid, profile_name, port) else None
+    return _find_profile_cdp_owner_pid(profile_name, port)
+
+
 def _get_cmdline_flag_value(cmdline: str, flag: str) -> str | None:
     """Extract a command-line flag value from raw process command text."""
     pattern = rf"(?:^|\s){re.escape(flag)}(?:=|\s+)(?:\"([^\"]*)\"|'([^']*)'|(\S+))"
@@ -921,8 +965,7 @@ def _listener_pid(port: int) -> int | None:
 
 def _profile_owned_cdp_listener(port: int, profile_name: str) -> bool:
     """Return whether the local CDP listener belongs to the requested profile."""
-    pid = _listener_pid(port)
-    return pid is not None and _mapped_chrome_owns_profile(pid, profile_name, port)
+    return _resolve_profile_cdp_owner_pid(port, profile_name) is not None
 
 
 def find_existing_nlm_chrome(
@@ -967,16 +1010,23 @@ def find_existing_nlm_chrome(
             _clear_port_map(port)
             continue
 
-        pid = entry.get("pid")
-        if not _mapped_chrome_owns_profile(pid, profile_name, port):
+        mapped_pid = entry.get("pid")
+        owner_pid = (
+            mapped_pid
+            if _mapped_chrome_owns_profile(mapped_pid, profile_name, port)
+            else _resolve_profile_cdp_owner_pid(port, profile_name)
+        )
+        if owner_pid is None:
             _logger.debug(
                 "Mapped Chrome on port %d (pid=%s) does not own profile '%s'; clearing",
                 port,
-                pid,
+                mapped_pid,
                 profile_name,
             )
             _clear_port_map(port)
             continue
+        if owner_pid != mapped_pid:
+            _write_port_map(port, profile_name, owner_pid)
 
         debugger_url = _normalize_ws_url(version_info.get("webSocketDebuggerUrl"))
         if debugger_url:
@@ -996,12 +1046,11 @@ def find_existing_nlm_chrome(
             _logger.debug("Skipping headless unmapped browser on port %d", port)
             continue
 
-        pid = _listener_pid(port)
-        if pid is None or not _mapped_chrome_owns_profile(pid, profile_name, port):
+        owner_pid = _resolve_profile_cdp_owner_pid(port, profile_name)
+        if owner_pid is None:
             _logger.debug(
-                "Ignoring unmapped CDP on port %d (pid=%s) for profile '%s'",
+                "Ignoring unmapped CDP on port %d for profile '%s': owner could not be verified",
                 port,
-                pid,
                 profile_name,
             )
             continue
@@ -1010,7 +1059,7 @@ def find_existing_nlm_chrome(
         if not debugger_url:
             continue
 
-        _write_port_map(port, profile_name, pid)
+        _write_port_map(port, profile_name, owner_pid)
         _logger.debug(
             "Reusing unmapped profile-owned Chrome on port %d for profile '%s'",
             port,
@@ -1212,8 +1261,8 @@ def close_profile_owned_cdp_browser(cdp_url: str, profile_name: str = "default")
             return False
 
         port = parsed.port
-        pid = _listener_pid(port)
-        if pid is None or not _mapped_chrome_owns_profile(pid, profile_name, port):
+        pid = _resolve_profile_cdp_owner_pid(port, profile_name)
+        if pid is None:
             return False
 
         version = _fetch_cdp_version(port, timeout=1)
@@ -1224,28 +1273,28 @@ def close_profile_owned_cdp_browser(cdp_url: str, profile_name: str = "default")
             for _ in range(20):
                 time.sleep(0.1)
                 if not _pid_is_alive(pid):
-                    replacement_pid = _listener_pid(port)
+                    replacement_pid = _resolve_profile_cdp_owner_pid(port, profile_name)
                     if replacement_pid not in (None, pid):
                         return False
                     _clear_port_map(port)
                     return True
 
         if not _pid_is_alive(pid):
-            replacement_pid = _listener_pid(port)
+            replacement_pid = _resolve_profile_cdp_owner_pid(port, profile_name)
             if replacement_pid not in (None, pid):
                 return False
             _clear_port_map(port)
             return True
 
-        current_pid = _listener_pid(port)
-        if current_pid != pid or not _mapped_chrome_owns_profile(pid, profile_name, port):
+        current_pid = _resolve_profile_cdp_owner_pid(port, profile_name)
+        if current_pid != pid:
             return False
 
         _kill_process(pid)
         for _ in range(20):
             time.sleep(0.1)
             if not _pid_is_alive(pid):
-                if _listener_pid(port) is not None:
+                if _resolve_profile_cdp_owner_pid(port, profile_name) is not None:
                     return False
                 _clear_port_map(port)
                 return True

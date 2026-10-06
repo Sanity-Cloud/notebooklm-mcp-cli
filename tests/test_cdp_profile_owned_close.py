@@ -130,3 +130,37 @@ def test_close_profile_owned_cdp_browser_reports_failed_force_kill(monkeypatch):
     assert cdp.close_profile_owned_cdp_browser("http://127.0.0.1:9227", "harmonywave13") is False
     assert killed == [4242]
     assert cleared == []
+
+
+def test_close_profile_owned_cdp_browser_uses_process_scan_when_listener_pid_is_unavailable(
+    monkeypatch,
+):
+    owner_candidates = iter([4242, None])
+    cleared: list[int] = []
+    closed: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(cdp, "_listener_pid", lambda _port: 0)
+    monkeypatch.setattr(
+        cdp,
+        "_find_profile_cdp_owner_pid",
+        lambda _profile, _port: next(owner_candidates),
+    )
+    monkeypatch.setattr(
+        cdp,
+        "_fetch_cdp_version",
+        lambda _port, timeout=1: {
+            "webSocketDebuggerUrl": "ws://127.0.0.1:19223/devtools/browser/managed"
+        },
+    )
+    monkeypatch.setattr(
+        cdp,
+        "execute_cdp_command",
+        lambda url, command: closed.append((url, command)),
+    )
+    monkeypatch.setattr(cdp, "_pid_is_alive", lambda _pid: False)
+    monkeypatch.setattr(cdp, "_clear_port_map", cleared.append)
+    monkeypatch.setattr(cdp.time, "sleep", lambda _seconds: None)
+
+    assert cdp.close_profile_owned_cdp_browser("http://127.0.0.1:19223", "pte") is True
+    assert closed == [("ws://127.0.0.1:19223/devtools/browser/managed", "Browser.close")]
+    assert cleared == [19223]

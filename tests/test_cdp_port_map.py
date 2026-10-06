@@ -470,3 +470,70 @@ def test_find_existing_nlm_chrome_ignores_unmapped_when_listener_pid_unknown(sto
         port, url = cdp.find_existing_nlm_chrome(profile_name="default")
 
     assert (port, url) == (None, None)
+
+
+def test_find_profile_cdp_owner_pid_recovers_exact_root_process(tmp_path, monkeypatch):
+    profile_dir = tmp_path / "pte"
+    profile_dir.mkdir()
+    foreign_dir = tmp_path / "foreign"
+    foreign_dir.mkdir()
+    monkeypatch.setattr(cdp, "get_chrome_path", lambda: "chrome.exe")
+    monkeypatch.setattr(
+        cdp,
+        "_get_profile_dir_for_launch",
+        lambda _chrome_path, _profile_name: profile_dir,
+    )
+    root = f'"chrome.exe" --remote-debugging-port=19223 --user-data-dir="{profile_dir}"'
+    renderer = (
+        f'"chrome.exe" --type=renderer --remote-debugging-port=19223 '
+        f'--user-data-dir="{profile_dir}"'
+    )
+    foreign = f'"chrome.exe" --remote-debugging-port=19223 --user-data-dir="{foreign_dir}"'
+    monkeypatch.setattr(
+        cdp,
+        "_iter_process_cmdlines",
+        lambda: iter([(111, renderer), (222, foreign), (333, root)]),
+    )
+
+    assert cdp._find_profile_cdp_owner_pid("pte", 19223) == 333
+
+
+def test_find_profile_cdp_owner_pid_fails_closed_on_ambiguous_roots(tmp_path, monkeypatch):
+    profile_dir = tmp_path / "pte"
+    profile_dir.mkdir()
+    monkeypatch.setattr(cdp, "get_chrome_path", lambda: "chrome.exe")
+    monkeypatch.setattr(
+        cdp,
+        "_get_profile_dir_for_launch",
+        lambda _chrome_path, _profile_name: profile_dir,
+    )
+    root = f'"chrome.exe" --remote-debugging-port=19223 --user-data-dir="{profile_dir}"'
+    monkeypatch.setattr(
+        cdp,
+        "_iter_process_cmdlines",
+        lambda: iter([(333, root), (444, root)]),
+    )
+
+    assert cdp._find_profile_cdp_owner_pid("pte", 19223) is None
+
+
+def test_find_existing_nlm_chrome_recovers_when_windows_listener_pid_is_unavailable(
+    storage_dir, monkeypatch
+):
+    version = {
+        "webSocketDebuggerUrl": "ws://127.0.0.1:19223/devtools/browser/abc",
+        "User-Agent": "Mozilla/5.0 Chrome/154",
+    }
+    monkeypatch.setattr(cdp, "_fetch_cdp_version", lambda _port, timeout=1: version)
+    monkeypatch.setattr(cdp, "_listener_pid", lambda _port: 0)
+    monkeypatch.setattr(cdp, "_find_profile_cdp_owner_pid", lambda _profile, _port: 333)
+
+    port, url = cdp.find_existing_nlm_chrome(
+        port_range=range(19223, 19224),
+        profile_name="pte",
+    )
+
+    assert port == 19223
+    assert url == "ws://127.0.0.1:19223/devtools/browser/abc"
+    mapping = json.loads((storage_dir / "chrome-port-map.json").read_text(encoding="utf-8"))
+    assert mapping == {"19223": {"profile": "pte", "pid": 333}}
