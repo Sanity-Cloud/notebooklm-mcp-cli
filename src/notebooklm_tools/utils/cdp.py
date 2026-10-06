@@ -303,18 +303,31 @@ def normalize_cdp_http_url(cdp_url: str) -> str:
     return f"http://{raw.rstrip('/')}"
 
 
-def find_available_port(starting_from: int = 9222, max_attempts: int = 10) -> int:
-    """Find an available port for Chrome debugging.
+def find_available_port(
+    starting_from: int = 9222,
+    max_attempts: int = 10,
+    *,
+    allow_ephemeral_fallback: bool = True,
+) -> int:
+    """Find an available loopback port for Chrome debugging.
+
+    Scans the conventional CDP range first. If every candidate is unavailable,
+    optionally asks the OS for an ephemeral loopback port. The fallback matters
+    on Windows hosts where Hyper-V/WinNAT can reserve a large contiguous block
+    around 9222 even when no process is listening there.
 
     Args:
-        starting_from: Port to start scanning from
-        max_attempts: Number of ports to try
+        starting_from: Port to start scanning from.
+        max_attempts: Number of adjacent ports to try first.
+        allow_ephemeral_fallback: If True, use an OS-assigned loopback port when
+            the requested range is unavailable. Exact-port callers can disable
+            this and retain the historical RuntimeError behavior.
 
     Returns:
-        An available port number
+        An available port number.
 
     Raises:
-        RuntimeError: If no available ports found
+        RuntimeError: If no available port can be reserved.
     """
     import socket
 
@@ -326,6 +339,15 @@ def find_available_port(starting_from: int = 9222, max_attempts: int = 10) -> in
                 return port
         except OSError:
             continue
+
+    if allow_ephemeral_fallback:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("127.0.0.1", 0))
+                return int(s.getsockname()[1])
+        except OSError:
+            pass
+
     raise RuntimeError(
         f"No available ports in range {starting_from}-{starting_from + max_attempts - 1}. "
         "Close some applications and try again."
