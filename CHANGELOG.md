@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Usage errors now include the account's plan identifier when Gemini Notebook returns no usage windows, instead of implying that usage is unavailable only for Enterprise/Workspace accounts ([Issue #352](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/352)).
+
 ## [0.15.3] - 2026-10-05
 
 > Browser login waits for real sign-in, saved-session checks reject anonymous cookies, and YouTube sources return their URLs.
