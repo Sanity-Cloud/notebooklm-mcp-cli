@@ -6,6 +6,7 @@ import urllib.parse
 from http.cookies import SimpleCookie
 
 from notebooklm_tools.core.credential_store import CredentialStoreError
+from notebooklm_tools.core.exceptions import AuthenticationError
 
 from ._utils import (
     ESSENTIAL_COOKIES,
@@ -77,6 +78,7 @@ def refresh_auth() -> ResultDict:
 
         cached = load_cached_tokens()
         stale_cached: tuple[str, str | None] | None = None
+        headless_failure: AuthenticationError | None = None
         if cached:
             # A disk reload is only success if the credentials still work. If
             # they are stale, keep going: the saved browser profile may still be
@@ -105,9 +107,16 @@ def refresh_auth() -> ResultDict:
                 profile_name = get_config().auth.default_profile
                 headless_port = _broker_headless_cdp_port(profile_name)
                 if headless_port is None:
-                    tokens = run_headless_auth(profile_name=profile_name)
+                    tokens = run_headless_auth(
+                        profile_name=profile_name,
+                        raise_on_error=True,
+                    )
                 else:
-                    tokens = run_headless_auth(profile_name=profile_name, port=headless_port)
+                    tokens = run_headless_auth(
+                        profile_name=profile_name,
+                        port=headless_port,
+                        raise_on_error=True,
+                    )
                 if tokens:
                     reset_client()
                     get_client()
@@ -115,22 +124,37 @@ def refresh_auth() -> ResultDict:
                         "status": "success",
                         "message": "Auth tokens refreshed via headless Chrome.",
                     }
-            except Exception:
-                pass
+            except CredentialStoreError:
+                raise
+            except AuthenticationError as exc:
+                headless_failure = exc
+            except Exception as exc:
+                headless_failure = AuthenticationError(
+                    message=f"Headless browser refresh failed ({type(exc).__name__})",
+                    hint="Run 'nlm login' in a desktop session to re-authenticate.",
+                )
 
         if stale_cached is not None:
             status, detail = stale_cached
-            reason_text = (
-                "automatic browser refresh is disabled (NOTEBOOKLM_DISABLE_HEADLESS_REFRESH=1)"
-                if headless_disabled
-                else "the saved browser profile could not refresh it automatically"
-            )
+            headless_details: dict[str, str] = {}
+            if headless_failure is not None:
+                reason_text = f"automatic browser refresh failed: {headless_failure.message}"
+                headless_details["headless_error"] = headless_failure.message
+                if headless_failure.hint:
+                    headless_details["headless_hint"] = headless_failure.hint
+            else:
+                reason_text = (
+                    "automatic browser refresh is disabled (NOTEBOOKLM_DISABLE_HEADLESS_REFRESH=1)"
+                    if headless_disabled
+                    else "the saved browser profile could not refresh it automatically"
+                )
             return error_result(
                 f"Cached auth is no longer valid and {reason_text}. "
                 "Run `nlm login` in a terminal to re-authenticate.",
                 status="expired",
                 reason=status,
                 details=detail,
+                **headless_details,
             )
 
         return {

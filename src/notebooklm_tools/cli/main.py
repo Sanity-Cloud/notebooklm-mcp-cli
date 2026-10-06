@@ -1064,7 +1064,10 @@ def auth_refresh(
 
     with console.status(f"Refreshing session for profile '{profile_name}'..."):
         try:
-            tokens = run_headless_auth(profile_name=profile_name)
+            tokens = run_headless_auth(
+                profile_name=profile_name,
+                raise_on_error=True,
+            )
         except Exception as exc:
             console.print(f"[red]✗[/red] Refresh failed: {exc}")
             raise typer.Exit(1) from exc

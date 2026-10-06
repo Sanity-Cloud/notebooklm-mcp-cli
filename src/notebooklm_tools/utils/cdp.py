@@ -2153,6 +2153,7 @@ def run_headless_auth(
     profile_name: str = "default",
     expected_revision: str | None = None,
     force: bool | None = None,
+    raise_on_error: bool = False,
 ) -> "Any | None":
     """Run authentication in headless mode (no user interaction).
 
@@ -2167,6 +2168,8 @@ def run_headless_auth(
         profile_name: The profile name to use for Chrome
         expected_revision: Optional expected revision for compare-and-save
         force: If True, overwrite without revision check
+        raise_on_error: If True, surface safe browser infrastructure failures
+            instead of collapsing them to None.
 
     Returns:
         AuthTokens if successful, None if failed or no saved login
@@ -2194,6 +2197,11 @@ def run_headless_auth(
 
     # Check if profile exists with saved login
     if not has_chrome_profile(profile_name):
+        if raise_on_error:
+            raise AuthenticationError(
+                message=f"No saved browser profile is available for '{profile_name}'",
+                hint="Run 'nlm login' once in a desktop session to create and sign in the managed browser profile.",
+            )
         return None
 
     chrome_process: subprocess.Popen | None = None
@@ -2222,20 +2230,40 @@ def run_headless_auth(
             port = find_available_port(starting_from=port)
             chrome_process = launch_chrome_process(port, headless=True, profile_name=profile_name)
             if not chrome_process:
+                if raise_on_error:
+                    raise AuthenticationError(
+                        message="Failed to launch the headless authentication browser",
+                        hint="Run 'nlm login' in a desktop session to re-authenticate.",
+                    )
                 return None
 
             # Wait for Chrome debugger to be ready
             debugger_url = get_debugger_url(port, tries=5)
             if not debugger_url:
+                if raise_on_error:
+                    raise AuthenticationError(
+                        message=f"Cannot connect to the headless authentication browser on port {port}",
+                        hint="Run 'nlm login' in a desktop session to re-authenticate.",
+                    )
                 return None
 
         # Find or create NotebookLM page
         page = find_or_create_notebooklm_page(port)
         if not page:
+            if raise_on_error:
+                raise AuthenticationError(
+                    message="Could not open NotebookLM in the headless authentication browser",
+                    hint="Run 'nlm login' in a desktop session to refresh the managed browser profile.",
+                )
             return None
 
         ws_url = _normalize_ws_url(page.get("webSocketDebuggerUrl"))
         if not ws_url:
+            if raise_on_error:
+                raise AuthenticationError(
+                    message="NotebookLM page did not expose a usable DevTools websocket",
+                    hint="Run 'nlm login' in a desktop session to refresh the managed browser profile.",
+                )
             return None
 
         # Poll for login completion (navigation is async)
@@ -2252,18 +2280,33 @@ def run_headless_auth(
             time.sleep(1)
 
         if not logged_in:
-            # Not logged in - headless can't help
+            # Not logged in - headless can't help without a prior visible sign-in.
+            if raise_on_error:
+                raise AuthenticationError(
+                    message=f"Saved browser profile '{profile_name}' is not signed in to NotebookLM",
+                    hint="Run 'nlm login' in a desktop session once, then headless refresh can reuse that managed browser session.",
+                )
             return None
 
         # Wait for full page load
         html, ready = _wait_for_page_ready(ws_url, timeout=timeout)
         if not ready:
+            if raise_on_error:
+                raise AuthenticationError(
+                    message="NotebookLM did not finish loading in the headless authentication browser",
+                    hint="Run 'nlm login' in a desktop session to refresh the managed browser profile.",
+                )
             return None
 
         # Keep the raw list so per-domain values survive profile storage.
         cookies_list = get_page_cookies(ws_url)
 
         if not validate_cookies(cookies_list):
+            if raise_on_error:
+                raise AuthenticationError(
+                    message="Saved browser profile did not expose the required NotebookLM cookies",
+                    hint="Run 'nlm login' in a desktop session to refresh the managed browser profile.",
+                )
             return None
 
         # Get page HTML for CSRF extraction
@@ -2283,6 +2326,11 @@ def run_headless_auth(
             extracted_at=time.time(),
         )
         if not _validate_headless_candidate(tokens, profile_name):
+            if raise_on_error:
+                raise AuthenticationError(
+                    message="NotebookLM rejected the credentials extracted from the saved browser profile",
+                    hint="Run 'nlm login' in a desktop session to refresh the managed browser profile.",
+                )
             return None
 
         save_kwargs: dict[str, Any] = {"profile_name": profile_name}
@@ -2300,7 +2348,23 @@ def run_headless_auth(
 
     except CredentialStoreError:
         raise
-    except Exception:
+    except AuthenticationError:
+        if raise_on_error:
+            raise
+        return None
+    except RuntimeError as exc:
+        if raise_on_error:
+            raise AuthenticationError(
+                message=str(exc),
+                hint="Run 'nlm login' in a desktop session to re-authenticate.",
+            ) from exc
+        return None
+    except Exception as exc:
+        if raise_on_error:
+            raise AuthenticationError(
+                message=f"Headless browser refresh failed ({type(exc).__name__})",
+                hint="Run 'nlm login' in a desktop session to re-authenticate.",
+            ) from exc
         return None
 
     finally:

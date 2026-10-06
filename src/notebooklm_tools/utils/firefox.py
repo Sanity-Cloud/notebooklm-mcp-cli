@@ -197,6 +197,7 @@ def run_headless_auth(
     profile_name: str = "default",
     expected_revision: str | None = None,
     force: bool | None = None,
+    raise_on_error: bool = False,
 ) -> Any | None:
     """Refresh cached credentials from the saved Firefox profile cookie store."""
     del timeout
@@ -239,5 +240,10 @@ def run_headless_auth(
         return tokens
     except CredentialStoreError:
         raise
-    except Exception:
+    except Exception as exc:
+        if raise_on_error:
+            raise AuthenticationError(
+                message=f"Headless Firefox refresh failed ({type(exc).__name__})",
+                hint="Run 'nlm login' in a desktop session to re-authenticate.",
+            ) from exc
         return None
