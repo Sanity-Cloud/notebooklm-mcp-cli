@@ -464,8 +464,7 @@ def test_automatic_recovery_drops_browser_result_on_disk_change(fake_credential_
         patch("notebooklm_tools.utils.cdp.get_page_cookies", side_effect=fake_get_page_cookies),
         patch("notebooklm_tools.utils.cdp.extract_csrf_token", return_value="browser_csrf"),
         patch("notebooklm_tools.utils.cdp.extract_session_id", return_value="browser_session"),
-        # The fork validates a browser candidate before persisting it. This
-        # test exercises revision-race handling, not live RPC validity.
+        # This test exercises revision-race handling, not live RPC validity.
         patch("notebooklm_tools.utils.cdp._validate_headless_candidate", return_value=True),
         patch("notebooklm_tools.utils.cdp.cleanup_chrome_profile_cache"),
     ):

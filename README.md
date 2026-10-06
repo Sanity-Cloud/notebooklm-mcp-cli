@@ -18,7 +18,9 @@
 > 💡 You can also use the 'nlm setup' wizard and select the 'Credentials Protection' option in the wizard
 > 
 > Optional: nothing changes unless you turn it on. Servers, cron, Docker and SSH setups can keep the plain file.
-> [How it works](docs/AUTHENTICATION.md#protected-storage)
+> 📖 [How it works](docs/AUTHENTICATION.md#protected-storage) · 📺 [Watch this short video](https://www.youtube.com/shorts/7ZmF_lwJh3M)
+>
+> 🤖 Fun fact: this video was created by an agent using the gemini-notebook-mcp.
 
 > **Note:** Personal/consumer accounts are tested regularly. Gemini Notebook Enterprise support is experimental. The documented `notebook.cloud.google.com` host has been live-verified with a project-qualified `global` deployment; other Enterprise host variants may require additional validation.
 
@@ -31,9 +33,9 @@
 
 ### Latest
 
-|                                   **Codex Setup + Cinematic Video & Slides**                                   |
-| :------------------------------------------------------------------------------------------------------------: |
-| [![Latest](https://img.youtube.com/vi/KrgLCrvU1dw/mqdefault.jpg)](https://www.youtube.com/watch?v=KrgLCrvU1dw) |
+| **Claude Cowork & Interactive Reports** | **Codex Setup + Cinematic Video & Slides** |
+| :---: | :---: |
+| [![Claude Cowork and Interactive Reports demo](https://img.youtube.com/vi/UXxqTpNNGt0/mqdefault.jpg)](https://www.youtube.com/watch?v=UXxqTpNNGt0) | [![Codex Setup, Cinematic Video and Slides demo](https://img.youtube.com/vi/KrgLCrvU1dw/mqdefault.jpg?v=20261002)](https://www.youtube.com/watch?v=KrgLCrvU1dw) |
 
 ### MCP Demos
 
@@ -51,10 +53,22 @@
 
 Three commands take you from nothing to a connected AI assistant:
 
+1. Install (gives you `nlm` and the MCP server):
+
 ```bash
-uv tool install notebooklm-mcp-cli   # 1. Install (gives you `nlm` and the MCP server)
-nlm login                            # 2. Sign in to your Google account
-nlm setup                            # 3. Connect your AI tools
+uv tool install notebooklm-mcp-cli
+```
+
+2. Sign in to your Google account:
+
+```bash
+nlm login
+```
+
+3. Connect your AI tools:
+
+```bash
+nlm setup
 ```
 
 ### The setup wizard (`nlm setup`)

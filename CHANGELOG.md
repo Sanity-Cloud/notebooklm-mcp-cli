@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Usage errors now include the account's plan identifier when Gemini Notebook returns no usage windows, instead of implying that usage is unavailable only for Enterprise/Workspace accounts ([Issue #352](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/352)).
+
+## [0.15.3] - 2026-10-05
+
+> Browser login waits for real sign-in, saved-session checks reject anonymous cookies, and YouTube sources return their URLs.
+
+### Added
+
+- Nothing added.
+
+### Fixed
+
+- **A fresh login no longer closes the browser before sign-in.** `nlm login` now waits for signed-in Google cookies and the app's CSRF token before saving credentials or reporting success. An anonymous landing page and its `NID` cookie cannot finish login. If sign-in times out, no anonymous credentials replace your saved session. Verified with a fresh profile on the reporting Mac: the browser stayed open until sign-in, then saved a usable session and closed normally ([Issue #350](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/350)).
+- **Broken saved sessions no longer trap users behind "Authentication valid."** Live authentication checks require the actual CSRF field or confirmation through the notebook API. Session IDs and unrelated `at=` text are no longer mistaken for CSRF tokens, and offline checks reject anonymous cookie sets even when they were saved recently. An API authentication rejection now reaches login validation instead of being hidden behind "network slow"; genuine network failures remain inconclusive.
+- **YouTube sources return their URLs.** Source listing and source content retrieval now read YouTube URLs from `metadata[5][0]` when the usual web URL slot is empty. Existing web-source extraction is preserved. Verified through the CLI and live MCP source tools; MCP responses retain their existing fields. Thanks to **@maxdata** for the fix and captured response examples ([PR #349](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/349)).
+
+### Changed
+
+- The README features the latest [Claude Cowork & Interactive Reports walkthrough](https://www.youtube.com/watch?v=UXxqTpNNGt0), alongside the Codex setup demo.
+- Authentication docs and the bundled skill explain real sign-in detection, recovery with the same profile, and the distinction between CLI source URLs and the current MCP response fields.
+
+### Removed
+
+- Nothing removed.
+
+## [0.15.2] - 2026-10-04
+
+> Research auto-import that waits out a slow start, a Windows credential-lock fix, and a `/healthz` alias for monitors that expect one.
+> Community release: two of these changes come from **@insane66613**.
+
+### Added
+
+- **The HTTP server answers `/healthz`, too.** Reverse proxies, tunnel monitors, and service supervisors that probe the conventional `/healthz` path used to get a 404 from `notebooklm-mcp --transport http` even when the server was healthy. `/health` is unchanged and `/healthz` returns the same response. Thanks to **@insane66613** ([PR #347](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/347)).
+
+### Fixed
+
+- **Windows credentials survive a transient file lock.** File-mode auth lets readers work without locks while a writer replaces credential files atomically, and on Windows a reader holding the file can briefly make the read or the final replace fail with a sharing violation. Ordinary CLI and MCP access could then fail authentication or quietly skip a credential save. Reads (root token cache, profile cookies, metadata) and the atomic replace now retry a few times, only for `PermissionError` and only on Windows; macOS and Linux still make a single attempt. Verified on Windows 11 against the repo's own concurrency test: 13 of 25 runs hit the bug before the fix, 0 of 25 after. Thanks to **@insane66613** ([PR #348](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/348)).
+- **`research start --auto-import` no longer gives up when the task isn't visible yet.** Right after a research task starts, the first status poll can come back empty for a moment. That was treated as "no research", so auto-import skipped the import and printed "Research may have timed out or failed" even though the research completed and found sources. While waiting on a known task ID, an empty poll is now retried for a short window (90 seconds at most, never past the caller's max wait) before concluding the task really isn't there. Single checks (`--max-wait 0`) and polls without a task ID behave as before. Reported by **@megaboy81-boop**, whose diagnosis pointed straight at the polling loop ([Issue #346](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/346)).
+
+## [0.15.1] - 2026-10-02
+
+> Safer, smarter login recovery, plus Microsoft Edge Beta.
+> Community release: five of these changes come from **@insane66613**.
+
+### Added
+
+- **Microsoft Edge Beta is a supported login browser.** Use `nlm config set auth.browser edge-beta`, or leave it on `auto`. Found on macOS, Linux and the usual Windows install folders. Docs and the skill reference list it too. Thanks to **@insane66613** for the browser support ([PR #345](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/345)).
+- **Health checks can target one saved account.** The credential health check can now be asked about a specific profile, and each profile keeps its own cached result instead of all accounts sharing one. Nothing in the CLI or MCP uses this yet; it is groundwork for multi-account checks. Thanks to **@insane66613** ([PR #343](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/343)).
+
+### Fixed
+
+- **A fresh browser login is checked before it replaces your saved one.** Headless recovery now proves the extracted login can really talk to Gemini Notebook before saving it. If it can't, your existing saved login stays untouched. Thanks to **@insane66613** ([PR #342](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/342)).
+- **`refresh_auth` can now recover a stale login on its own.** When saved credentials are stale, the MCP `refresh_auth` tool now tries the saved browser profile before telling you to run `nlm login` (before, that step was unreachable). It respects `NOTEBOOKLM_DISABLE_HEADLESS_REFRESH=1`, so Google Workspace accounts that lose their session when the browser is relaunched can opt out; when it is set, the message says so. Studio's "not signed in" hint was updated to match. Thanks to **@insane66613** for the fix ([PR #341](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/341)); the opt-out check was added during review.
+- **Renaming a profile now keeps its saved browser login with it.** `nlm login profile rename` moves the Chrome browser folder (and the Firefox one) along with the account, so the next login doesn't start from a blank browser. It refuses the rename if a browser folder already exists under the new name, and rolls everything back if a later step fails. Protected profiles still can't be renamed. Thanks to **@insane66613** ([PR #344](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/344)); the Firefox folder and the existing-folder check were added during review.
 - The first-ever creation of `installation.json` (the install identity used for protected storage) is now atomic: it is written to a temporary file and renamed into place, so a second process starting at the same moment can never read a half-written file and fail with "Corrupt or unreadable installation.json". This only affected a first protected write racing another process; it also made one CI test intermittently fail.
 
 ## [0.15.0] - 2026-10-01

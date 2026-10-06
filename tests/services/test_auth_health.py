@@ -22,6 +22,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import httpx
+import pytest
 
 from notebooklm_tools.core.auth import AuthManager
 from notebooklm_tools.services.auth import (
@@ -159,6 +160,31 @@ def _save_fake_profile(tmp_path, monkeypatch):
         },
         email="test@example.com",
     )
+
+
+@pytest.mark.parametrize(
+    "api_result, expected_status",
+    [
+        ((False, "ClientAuthenticationError: expired"), "stale"),
+        ((False, "network_error: ReadTimeout"), "unverified"),
+        ((True, None), "configured"),
+    ],
+)
+def test_public_homepage_does_not_prove_health(tmp_path, monkeypatch, api_result, expected_status):
+    _save_fake_profile(tmp_path, monkeypatch)
+    response = httpx.Response(
+        200,
+        request=httpx.Request("GET", "https://notebook.google.com/"),
+        text='{"FdrFJe":"123","cfb2h":"public"}',
+    )
+    with (
+        patch("notebooklm_tools.core.auth._fetch_notebooklm_homepage", return_value=response),
+        patch.object(AuthHealthChecker, "_probe_api", return_value=api_result),
+    ):
+        report = AuthHealthChecker().check(force=True)
+
+    assert report.status == expected_status
+    assert report.valid is (expected_status == "configured")
 
 
 class TestCheckEndToEnd:
@@ -331,7 +357,7 @@ class TestCredentialsAreUsable:
             valid=True,
             status="configured",
             probes=[],
-            profile="harmonywave13",
+            profile="work",
             checked_at=0.0,
         )
 
@@ -345,11 +371,12 @@ class TestCredentialsAreUsable:
         )
         from notebooklm_tools.services.auth import credentials_are_usable
 
-        usable, status, detail = credentials_are_usable(profile="harmonywave13")
+        usable, status, detail = credentials_are_usable(profile="work")
+
         assert usable is True
         assert status == "configured"
         assert detail is None
-        assert seen["profile"] == "harmonywave13"
+        assert seen["profile"] == "work"
 
     def test_returns_configured_when_health_checker_passes(self, monkeypatch):
         report = AuthHealthReport(
@@ -582,11 +609,12 @@ class TestSingleton:
         assert isinstance(get_auth_health_checker(), AuthHealthChecker)
 
     def test_explicit_profiles_receive_independent_cached_checkers(self):
-        pte = get_auth_health_checker(profile="pte")
-        harmony = get_auth_health_checker(profile="harmonywave13")
-        assert pte is get_auth_health_checker(profile="pte")
-        assert harmony is get_auth_health_checker(profile="harmonywave13")
-        assert pte is not harmony
+        work = get_auth_health_checker(profile="work")
+        personal = get_auth_health_checker(profile="personal")
+
+        assert work is get_auth_health_checker(profile="work")
+        assert personal is get_auth_health_checker(profile="personal")
+        assert work is not personal
 
 
 # ---------------------------------------------------------------------------

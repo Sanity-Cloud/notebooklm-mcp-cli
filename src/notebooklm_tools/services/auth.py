@@ -53,6 +53,7 @@ __all__ = [
     "get_active_auth_mtime",
     "get_auth_health_checker",
     "get_cache_path",
+    "get_notebook_count",
     "load_cached_tokens",
     "save_tokens_to_cache",
     "validate_cookies",
@@ -488,6 +489,8 @@ class AuthHealthChecker:
                 return False, f"http_{resp.status_code}", None, resp.status_code
 
             csrf = _core_auth.extract_csrf_from_page_source(resp.text) or ""
+            if not csrf:
+                return False, "expired", final_url, resp.status_code
             return True, None, csrf, resp.status_code
 
         except Exception as e:
@@ -626,6 +629,29 @@ class AuthHealthChecker:
 # ---------------------------------------------------------------------------
 
 
+def get_notebook_count(profile: Any) -> int | None:
+    """Return a best-effort count without hiding an API authentication rejection."""
+    from notebooklm_tools.core.client import NotebookLMClient
+    from notebooklm_tools.core.errors import ClientAuthenticationError
+    from notebooklm_tools.core.exceptions import AuthenticationError
+    from notebooklm_tools.services.errors import ServiceError
+
+    try:
+        with NotebookLMClient(
+            cookies=profile.cookies,
+            csrf_token=profile.csrf_token or "",
+            session_id=profile.session_id or "",
+            build_label=profile.build_label or "",
+            base_host=profile.base_host or "",
+            profile_name=getattr(profile, "name", None),
+        ) as client:
+            return len(client.list_notebooks())
+    except (AuthenticationError, ClientAuthenticationError) as exc:
+        raise ServiceError("Credentials have expired.", category="authentication") from exc
+    except Exception:
+        return None
+
+
 def confirm_auth_via_api(profile: str | None = None) -> tuple[bool, str | None]:
     """Confirm credentials with a live NotebookLM API call.
 
@@ -692,12 +718,12 @@ _checker_lock = threading.Lock()
 
 
 def get_auth_health_checker(profile: str | None = None) -> AuthHealthChecker:
-    """Return a process-wide AuthHealthChecker scoped to one auth profile.
+    """Return the cached AuthHealthChecker for one auth profile.
 
-    Calls that omit ``profile`` retain the historical process-wide checker
-    for the configured default profile. Explicit profiles receive independent
-    cached health state so one process can validate multiple NotebookLM
-    identities without switching global configuration.
+    Calls that omit ``profile`` retain the historical shared checker for the
+    configured default profile. Explicit profile names receive independent
+    cached health state so one process can validate multiple saved accounts
+    without switching global configuration.
     """
     key = profile.strip() if isinstance(profile, str) and profile.strip() else None
     checker = _checkers.get(key)

@@ -21,6 +21,9 @@ from notebooklm_tools.utils.config import get_base_url
 # Use logging instead of print to avoid corrupting MCP stdio protocol
 logger = logging.getLogger(__name__)
 
+_WINDOWS_SHARE_RETRY_ATTEMPTS = 8 if os.name == "nt" else 1
+_WINDOWS_SHARE_RETRY_BASE_DELAY = 0.01
+
 
 @dataclass
 class AuthTokens:
@@ -154,8 +157,7 @@ def load_cached_tokens(profile_name: str | None = None) -> AuthTokens | None:
         return None
 
     try:
-        with open(cache_path, encoding="utf-8") as f:
-            data = json.load(f)
+        data = _read_json_with_windows_retry(cache_path)
         tokens = AuthTokens.from_dict(data)
 
         # Just warn if tokens are old, but still return them
@@ -170,15 +172,33 @@ def load_cached_tokens(profile_name: str | None = None) -> AuthTokens | None:
 
 
 def _read_json_with_windows_retry(path: Path) -> Any:
-    """Read JSON, tolerating Windows' transient sharing violations during replace."""
-    for attempt in range(8):
+    """Read JSON, tolerating transient Windows file-sharing violations.
+
+    File-mode auth permits lock-free readers while writers use atomic
+    replacement. Windows can briefly deny a read while the destination is
+    being replaced, so retry only within a small bounded platform-specific
+    window. POSIX behavior remains single-attempt.
+    """
+    for attempt in range(_WINDOWS_SHARE_RETRY_ATTEMPTS):
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except PermissionError:
-            if os.name != "nt" or attempt == 7:
+            if attempt + 1 >= _WINDOWS_SHARE_RETRY_ATTEMPTS:
                 raise
-            time.sleep(0.01 * (attempt + 1))
+            time.sleep(_WINDOWS_SHARE_RETRY_BASE_DELAY * (attempt + 1))
     raise RuntimeError("unreachable")
+
+
+def _replace_with_windows_retry(source: Path, destination: Path) -> None:
+    """Atomically replace a file, retrying transient Windows sharing violations."""
+    for attempt in range(_WINDOWS_SHARE_RETRY_ATTEMPTS):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt + 1 >= _WINDOWS_SHARE_RETRY_ATTEMPTS:
+                raise
+            time.sleep(_WINDOWS_SHARE_RETRY_BASE_DELAY * (attempt + 1))
 
 
 def _atomic_write_json(target_path: Path, data: Any) -> None:
@@ -199,19 +219,7 @@ def _atomic_write_json(target_path: Path, data: Any) -> None:
             with contextlib.suppress(OSError):
                 os.close(fd)
             raise
-        # Windows can transiently deny replacement while another thread or
-        # process has the destination open for reading. The profile lock
-        # serializes writers but intentionally does not block readers, so retry
-        # the atomic swap briefly rather than turning a harmless read race into
-        # a failed credential save.
-        for attempt in range(8):
-            try:
-                os.replace(tmp_path, target_path)
-                break
-            except PermissionError:
-                if os.name != "nt" or attempt == 7:
-                    raise
-                time.sleep(0.01 * (attempt + 1))
+        _replace_with_windows_retry(tmp_path, target_path)
     finally:
         if tmp_path.exists():
             with contextlib.suppress(OSError):
@@ -326,19 +334,8 @@ def extract_csrf_from_page_source(html: str) -> str | None:
     """
     import re
 
-    # Try different patterns for CSRF token
-    patterns = [
-        r'"SNlM0e":"([^"]+)"',  # WIZ_global_data.SNlM0e
-        r'at=([^&"]+)',  # Direct at= value
-        r'"FdrFJe":"([^"]+)"',  # Alternative location
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, html)
-        if match:
-            return match.group(1)
-
-    return None
+    match = re.search(r'"SNlM0e":"([^"]+)"', html)
+    return match.group(1) if match else None
 
 
 def extract_session_id_from_page(html: str) -> str | None:
@@ -1097,6 +1094,8 @@ def check_auth(
         return AuthCheckResult(valid=False, reason="no_tokens", live=live, profile=profile)
 
     if not live:
+        if not validate_cookies(cookie_dict):
+            return AuthCheckResult(valid=False, reason="expired", live=False, profile=profile)
         # Pure heuristic based on last successful validation
         if p.last_validated:
             # Consider anything validated in the last 7 days as good for the
@@ -1118,10 +1117,10 @@ def check_auth(
         final_url = str(resp.url)
         redirected_to_login = "accounts.google.com" in final_url
 
-        if not redirected_to_login and resp.status_code == 200:
+        csrf = extract_csrf_from_page_source(resp.text) or ""
+        if not redirected_to_login and resp.status_code == 200 and csrf:
             # Clean authenticated homepage: fast positive. Extract fresh CSRF
             # while we're here and record last_validated.
-            csrf = extract_csrf_from_page_source(resp.text) or ""
             manager.save_profile(
                 cookies=p.cookies,
                 csrf_token=csrf or p.csrf_token,
@@ -1138,7 +1137,7 @@ def check_auth(
                 details={"csrf_token": csrf} if csrf else None,
             )
 
-        if not redirected_to_login:
+        if not redirected_to_login and resp.status_code != 200:
             return AuthCheckResult(
                 valid=False,
                 reason=f"http_{resp.status_code}",
@@ -1146,8 +1145,8 @@ def check_auth(
                 profile=profile,
             )
 
-        # A homepage login redirect is not definitive. Some live sessions still
-        # bounce there, while the batchexecute API accepts the same cookies.
+        # A redirect or a public landing page without CSRF cannot prove auth.
+        # Some live sessions still work through the batchexecute API.
 
     except Exception as exc:
         # Network / timeout / etc. — be conservative but do not lie.
@@ -1160,8 +1159,7 @@ def check_auth(
             details={"exception": str(exc)},
         )
 
-    # Homepage bounced to login. Confirm with the RPC path real operations use
-    # before declaring the profile expired.
+    # Confirm with the RPC path real operations use before declaring expiry.
     try:
         from notebooklm_tools.core.client import NotebookLMClient
         from notebooklm_tools.core.errors import ClientAuthenticationError

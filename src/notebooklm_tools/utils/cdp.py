@@ -1895,6 +1895,8 @@ def extract_cookies_from_page(
     wait_for_login: bool = True,
     login_timeout: int = 300,
 ) -> dict[str, Any]:
+    from notebooklm_tools.core.auth import validate_cookies
+
     page = find_or_create_notebooklm_page_by_cdp_url(cdp_http_url)
     if not page:
         raise AuthenticationError(
@@ -1914,50 +1916,34 @@ def extract_cookies_from_page(
     if not _is_notebooklm_url(current_url):
         navigate_to_url(ws_url, get_notebooklm_url())
 
-    # Check login status
-    current_url = get_current_url(ws_url)
-
-    if not is_logged_in(current_url) and wait_for_login:
+    # Anonymous landing pages use the same host and have page metadata too.
+    # Only accept the app's CSRF token together with signed-in Google cookies.
+    start_time = time.time()
+    last_log_at = 0
+    if wait_for_login:
         _logger.warning("Waiting for sign-in in browser window (timeout: %ds)...", login_timeout)
-        start_time = time.time()
-        last_log_at = 0
-        while time.time() - start_time < login_timeout:
-            # Interactive sign-in is human-paced; avoid high-frequency CDP polling.
-            time.sleep(2.0)
-            try:
-                current_url = get_current_url(ws_url)
-                if is_logged_in(current_url):
+    while True:
+        try:
+            current_url = get_current_url(ws_url)
+            if is_logged_in(current_url):
+                html = get_page_html(ws_url)
+                cookies = get_page_cookies(ws_url)
+                csrf_token = extract_csrf_token(html)
+                if csrf_token and validate_cookies(cookies):
                     break
-            except Exception:
-                pass
-            elapsed = int(time.time() - start_time)
-            if elapsed - last_log_at >= 30:
-                last_log_at = elapsed
-                _logger.warning("Still waiting for sign-in... (%ds elapsed)", elapsed)
-
-        if not is_logged_in(current_url):
+        except Exception:
+            pass
+        elapsed = time.time() - start_time
+        if not wait_for_login or elapsed >= login_timeout:
             raise AuthenticationError(
-                message="Login timeout",
+                message="Login timeout" if wait_for_login else "Browser is not signed in",
                 hint="Please log in to NotebookLM in the connected browser window.",
             )
+        if int(elapsed) - last_log_at >= 30:
+            last_log_at = int(elapsed)
+            _logger.warning("Still waiting for sign-in... (%ds elapsed)", last_log_at)
+        time.sleep(0.5)
 
-    # Wait for NotebookLM to fully load (session tokens in DOM)
-    html, ready = _wait_for_page_ready(ws_url, timeout=30)
-    if not ready:
-        _logger.warning("Page loaded but session tokens not found in DOM after 30s")
-
-    # Extract cookies
-    cookies = get_page_cookies(ws_url)
-
-    if not cookies:
-        raise AuthenticationError(
-            message="No cookies extracted",
-            hint="Make sure you're fully logged in.",
-        )
-
-    # Get page HTML for CSRF, session ID, email, and build label
-    # html already fetched by _wait_for_page_ready
-    csrf_token = extract_csrf_token(html)
     session_id = extract_session_id(html)
     email = extract_email(html)
     build_label = extract_build_label(html)
@@ -2069,35 +2055,25 @@ def cleanup_chrome_profile_cache(profile_name: str = "default") -> int:
 
 
 def _validate_headless_candidate(tokens: "Any", profile_name: str) -> bool:
-    """Prove extracted browser credentials work before replacing the profile cache."""
+    """Prove extracted browser credentials work before replacing saved auth."""
     from notebooklm_tools.core.client import NotebookLMClient
 
-    client = NotebookLMClient(
-        cookies=tokens.cookies,
-        csrf_token=tokens.csrf_token,
-        session_id=tokens.session_id,
-        build_label=tokens.build_label or "",
-        base_host=tokens.base_host or "",
-        profile_name=profile_name,
-        # Candidate validation must be side-effect free. Protected-mode clients
-        # can otherwise participate in token persistence while proving the
-        # candidate, before this function has accepted it.
-        is_env_auth=True,
-    )
     try:
-        # Call the same read-only RPC as list_notebooks, but mark auth recovery
-        # exhausted so an invalid candidate cannot recursively launch headless auth.
-        client._call_rpc(
-            client.RPC_LIST_NOTEBOOKS,
-            [None, 1, None, [2]],
-            _retry=True,
-            _deep_retry=True,
-        )
+        with NotebookLMClient(
+            cookies=tokens.cookies,
+            csrf_token=tokens.csrf_token,
+            session_id=tokens.session_id,
+            build_label=tokens.build_label or "",
+            base_host=tokens.base_host or "",
+            profile_name=profile_name,
+            # Candidate validation must not persist token rotations before the
+            # candidate itself has been accepted and saved by run_headless_auth.
+            is_env_auth=True,
+        ) as client:
+            client.list_notebooks()
         return True
     except Exception:
         return False
-    finally:
-        client.close()
 
 
 def run_headless_auth(
@@ -2225,8 +2201,9 @@ def run_headless_auth(
         session_id = extract_session_id(html)
         base_host = urlparse(current_url).hostname or ""
 
-        # Build a candidate first. Do not replace the profile cache until an
-        # authenticated NotebookLM RPC proves these browser credentials work.
+        # Build a candidate first. Do not replace saved credentials until
+        # an authenticated NotebookLM RPC proves the extracted browser session
+        # works outside the browser context.
         tokens = AuthTokens(
             cookies=cookies_list,
             csrf_token=csrf_token or "",

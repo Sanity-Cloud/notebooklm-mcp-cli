@@ -95,6 +95,11 @@ nlm notebook query <id> "question" --json # Response includes the original quest
 
 ### Sources
 
+`nlm source list --json` and `nlm source get --json` include the original URL
+for web and YouTube sources. Use `source list --url` for an ID-to-URL list.
+The MCP `source_list_drive` and `source_get_content` responses currently omit
+this field; use the CLI when you need source URLs.
+
 ```bash
 nlm source list <notebook>                         # List sources
 nlm source add <notebook> --url "https://..."      # Add URL
@@ -313,7 +318,7 @@ nlm config set output.format json       # Change default output format
 | `output.format`        | `table`   | Default output format (table, json)                                                                                                                                                                |
 | `output.color`         | `true`    | Enable colored output                                                                                                                                                                              |
 | `output.short_ids`     | `true`    | Show shortened IDs                                                                                                                                                                                 |
-| `auth.browser`         | `auto`    | Preferred browser for login (auto, chrome, arc, brave, edge, chromium, firefox, vivaldi, opera). Falls back to auto if the preferred browser is not found.                                         |
+| `auth.browser`         | `auto`    | Preferred browser for login (auto, chrome, arc, brave, edge, edge-beta, chromium, firefox, vivaldi, opera). Falls back to auto if the preferred browser is not found.                                         |
 | `auth.default_profile` | `default` | Profile to use when `--profile` not specified. **Note:** MCP tools use the active profile: the saved default, unless the MCP `profile` tool switched this server (until it restarts), environment cookies are set, or `usage_get(profile=...)` selects another account. |
 
 ### Aliases (Shortcuts)

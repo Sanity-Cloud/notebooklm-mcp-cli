@@ -240,6 +240,9 @@ class TestCDPStartupHandling:
         close_calls: list[tuple[str, str]] = []
         monkeypatch.setattr(cdp, "has_chrome_profile", lambda _profile: True)
         monkeypatch.setattr(cdp, "find_existing_nlm_chrome", lambda **_kwargs: (None, None))
+        monkeypatch.setattr(
+            cdp, "find_available_port", lambda starting_from, **_kwargs: starting_from
+        )
         monkeypatch.setattr(cdp, "launch_chrome_process", lambda *_args, **_kwargs: FakeProcess())
         monkeypatch.setattr(cdp, "get_debugger_url", lambda *_args, **_kwargs: None)
         monkeypatch.setattr(cdp, "terminate_chrome", lambda *_args, **_kwargs: True)

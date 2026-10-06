@@ -76,10 +76,11 @@ def refresh_auth() -> ResultDict:
         from notebooklm_tools.services.auth import load_cached_tokens
 
         cached = load_cached_tokens()
-        stale_cached: tuple[str, str] | None = None
+        stale_cached: tuple[str, str | None] | None = None
         if cached:
-            # Reloading dead disk tokens is not success, but a stale cache must
-            # not prevent the saved browser profile from minting fresh tokens.
+            # A disk reload is only success if the credentials still work. If
+            # they are stale, keep going: the saved browser profile may still be
+            # able to mint fresh credentials via the headless recovery path.
             from notebooklm_tools.services.auth import credentials_are_usable
 
             usable, status, detail = credentials_are_usable(force=True)
@@ -92,35 +93,41 @@ def refresh_auth() -> ResultDict:
                 }
             stale_cached = (status, detail)
 
-        # Prefer validated headless recovery. If the external broker manages this
-        # profile, use its dedicated per-profile headless CDP port to avoid browser
-        # identity collisions with visible login sessions.
-        try:
-            from notebooklm_tools.utils.auth_browser import run_headless_auth
-            from notebooklm_tools.utils.config import get_config
+        # Try headless auth if the configured default Chrome profile exists.
+        # Skipped when the user opted out (e.g. Workspace accounts whose session
+        # is revoked when the saved browser profile is relaunched, issue #330).
+        headless_disabled = os.environ.get("NOTEBOOKLM_DISABLE_HEADLESS_REFRESH") == "1"
+        if not headless_disabled:
+            try:
+                from notebooklm_tools.utils.auth_browser import run_headless_auth
+                from notebooklm_tools.utils.config import get_config
 
-            profile_name = get_config().auth.default_profile
-            headless_port = _broker_headless_cdp_port(profile_name)
-            if headless_port is None:
-                tokens = run_headless_auth(profile_name=profile_name)
-            else:
-                tokens = run_headless_auth(profile_name=profile_name, port=headless_port)
-            if tokens:
-                reset_client()
-                get_client()
-                return {
-                    "status": "success",
-                    "message": "Auth tokens refreshed via headless Chrome.",
-                }
-        except Exception:
-            pass
+                profile_name = get_config().auth.default_profile
+                headless_port = _broker_headless_cdp_port(profile_name)
+                if headless_port is None:
+                    tokens = run_headless_auth(profile_name=profile_name)
+                else:
+                    tokens = run_headless_auth(profile_name=profile_name, port=headless_port)
+                if tokens:
+                    reset_client()
+                    get_client()
+                    return {
+                        "status": "success",
+                        "message": "Auth tokens refreshed via headless Chrome.",
+                    }
+            except Exception:
+                pass
 
         if stale_cached is not None:
             status, detail = stale_cached
+            reason_text = (
+                "automatic browser refresh is disabled (NOTEBOOKLM_DISABLE_HEADLESS_REFRESH=1)"
+                if headless_disabled
+                else "the saved browser profile could not refresh it automatically"
+            )
             return error_result(
-                "Cached auth is no longer valid and the saved browser profile "
-                "could not refresh it automatically. Run `nlm login` in a terminal "
-                "to re-authenticate.",
+                f"Cached auth is no longer valid and {reason_text}. "
+                "Run `nlm login` in a terminal to re-authenticate.",
                 status="expired",
                 reason=status,
                 details=detail,

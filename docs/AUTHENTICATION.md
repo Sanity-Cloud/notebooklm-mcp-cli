@@ -14,7 +14,7 @@ Gemini Notebook uses browser cookies for authentication (there is no official AP
 - Chromium-family browsers use Chrome DevTools Protocol (CDP)
 - Firefox uses an isolated profile and reads its cookie store directly (no CDP or WebDriver required)
 
-**Supported browsers**: Google Chrome, Arc (macOS), Dia (macOS) Brave, Microsoft Edge, Chromium, Firefox, Vivaldi, Opera.
+**Supported browsers**: Google Chrome, Arc (macOS), Dia (macOS) Brave, Microsoft Edge, Microsoft Edge Beta, Chromium, Firefox, Vivaldi, Opera.
 
 On Windows, standalone Chromium is discovered in the standard machine-wide
 locations under `C:\Program Files` and `C:\Program Files (x86)`, plus the
@@ -36,7 +36,7 @@ This method launches your browser automatically and extracts cookies after you l
 
 ### Prerequisites
 
-- A supported browser installed (Chrome, Arc, Dia, Brave, Edge, Chromium, Firefox, Vivaldi, or Opera)
+- A supported browser installed (Chrome, Arc, Dia, Brave, Edge, Edge Beta, Chromium, Firefox, Vivaldi, or Opera)
 - Chromium-family browsers should be **completely closed** before running
 
 ### Steps
@@ -55,11 +55,11 @@ nlm login                      # Recommended
 # 4. Wait for "Successfully authenticated!"
 ```
 
-If your DevTools endpoint is slow to respond, you can increase the timeout:
-
-```bash
-nlm login --devtools-timeout 15
-```
+Chromium/CDP login waits up to 300 seconds for sign-in. A page at
+`notebook.google.com`, an HTTP 200 response, or an anonymous `NID` cookie does
+not prove authentication. Login waits for signed-in Google cookies and the
+app's CSRF token before saving credentials or reporting success. A timeout
+does not save anonymous credentials or replace an existing saved login.
 
 ### What Happens Behind the Scenes
 
@@ -67,8 +67,23 @@ nlm login --devtools-timeout 15
 2. A dedicated browser profile is created for authentication
 3. The browser launches with the appropriate automation backend
 4. You log in to Gemini Notebook via the browser
-5. Cookies are extracted and cached; CSRF/session fields are refreshed automatically when needed
-6. The browser is closed automatically
+5. Signed-in cookies and the CSRF token are extracted and cached; session fields are refreshed automatically when needed
+6. Builtin login closes the browser it launched after successful extraction. Externally managed CDP browsers remain open.
+
+### Recovering a Saved Session
+
+If authentication has expired, retry login with the same profile, then check it:
+
+```bash
+nlm login --profile work
+nlm login --check --profile work
+```
+
+In v0.15.3 and later, an anonymous session saved by an older version no longer
+passes validation and blocks browser login. Upgrade first if an older version
+reports success with only `NID` and no CSRF token. Profile deletion is not the
+first recovery step. If a check is inconclusive because of a timeout or network
+failure, check connectivity or try a read-only API call before re-authenticating.
 
 When Firefox is selected, the profile is isolated under the NLM storage directory and its cookie database is read directly. Because cookie extraction cannot prove which Google account is active, re-login against an existing saved profile requires explicit `nlm login --force` after you confirm the account.
 
@@ -83,7 +98,7 @@ nlm config set auth.browser brave
 # Or use an environment variable
 export NLM_BROWSER=arc
 
-# Valid values: auto, chrome, arc, brave, edge, chromium, firefox, vivaldi, opera
+# Valid values: auto, chrome, arc, brave, edge, edge-beta, chromium, firefox, vivaldi, opera
 # If the preferred browser is not installed, falls back to auto-detection.
 ```
 

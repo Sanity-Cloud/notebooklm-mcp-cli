@@ -352,6 +352,10 @@ nlm source list <notebook-id> [OPTIONS]
 When freshness is skipped, `stale`/`is_stale` is `null` (unknown), not
 `false` (fresh).
 
+Source listing JSON includes `url` for web and YouTube sources. The current MCP
+`source_list_drive` and `source_get_content` responses omit this field; use the
+CLI when an original source URL is needed.
+
 ### nlm source add
 
 Add a source to a notebook.
@@ -401,6 +405,8 @@ nlm source get <source-id> [OPTIONS]
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--profile` | `-p` | Use specific profile |
+
+`nlm source get <source-id> --json` includes the original web or YouTube `url`.
 
 ### nlm source describe
 
@@ -1104,7 +1110,7 @@ nlm config set <key> <value>
 | `output.format` | `table` | Default output format (table, json) |
 | `output.color` | `true` | Enable colored output |
 | `output.short_ids` | `true` | Show shortened IDs |
-| `auth.browser` | `auto` | Preferred browser for login (auto, chrome, arc, dia, comet, brave, edge, chromium, firefox, vivaldi, opera). Falls back to auto if a preferred named browser is not found. |
+| `auth.browser` | `auto` | Preferred browser for login (auto, chrome, arc, dia, comet, brave, edge, edge-beta, chromium, firefox, vivaldi, opera). Falls back to auto if a preferred named browser is not found. |
 | `auth.browser_path` | empty | Explicit Chromium-compatible executable path. Overrides named discovery; `NLM_BROWSER_PATH` provides the environment override. |
 | `auth.default_profile` | `default` | Profile to use when `--profile` not specified. **Note:** The MCP Server always uses the active default profile. Changing this setting will instantaneously switch the MCP server's Google account. |
 
