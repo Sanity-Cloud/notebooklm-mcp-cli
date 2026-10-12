@@ -160,7 +160,7 @@ def run_headless_auth(
     if "chromium_cdp" not in attempts:
         attempts.append("chromium_cdp")
 
-    last_failure: AuthenticationError | None = None
+    first_failure: AuthenticationError | None = None
     for backend in attempts:
         try:
             if backend == "chromium_cdp":
@@ -196,9 +196,11 @@ def run_headless_auth(
         except CredentialStoreError:
             raise
         except AuthenticationError as exc:
-            last_failure = exc
+            # Keep the preferred backend's failure; fallbacks must not hide it.
+            if first_failure is None:
+                first_failure = exc
             continue
 
-    if raise_on_error and last_failure is not None:
-        raise last_failure
+    if raise_on_error and first_failure is not None:
+        raise first_failure
     return None

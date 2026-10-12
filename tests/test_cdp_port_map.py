@@ -135,6 +135,8 @@ def test_find_existing_nlm_chrome_clears_port_when_pid_uses_foreign_profile(stor
         patch.object(cdp, "_get_profile_dir_for_launch", return_value=profile_dir),
         patch.object(cdp, "get_chrome_path", return_value="chrome.exe"),
         patch.object(cdp, "_get_process_cmdline", return_value=foreign_cmdline),
+        # Do not query the live OS for every CDP port during this ownership test.
+        patch.object(cdp, "_listener_pid", return_value=999),
     ):
         port, url = cdp.find_existing_nlm_chrome(profile_name="default")
 

@@ -1754,6 +1754,45 @@ def _kill_stale_nlm_browsers() -> None:
                 _clear_port_map(int(port_str))
 
 
+def _clear_managed_profile_directory(profile_name: str, profile_dir: Path) -> None:
+    """Close a profile-owned browser and remove its managed user-data directory."""
+    existing_port, debugger_url = find_existing_nlm_chrome(
+        profile_name=profile_name,
+        include_headless=True,
+    )
+    if existing_port is not None and debugger_url:
+        closed = close_profile_owned_cdp_browser(_cdp_http_base(existing_port), profile_name)
+        if not closed:
+            remaining_port, remaining_url = find_existing_nlm_chrome(
+                profile_name=profile_name,
+                include_headless=True,
+            )
+            if remaining_port is not None and remaining_url:
+                raise AuthenticationError(
+                    message=f"Could not close browser profile '{profile_name}'",
+                    hint=(
+                        "Close the managed NotebookLM browser for this profile and run "
+                        "'nlm login --clear' again."
+                    ),
+                )
+
+    for _ in range(20):
+        if not profile_dir.exists():
+            return
+        shutil.rmtree(profile_dir, ignore_errors=True)
+        if not profile_dir.exists():
+            return
+        time.sleep(0.1)
+
+    raise AuthenticationError(
+        message=f"Could not clear browser profile '{profile_name}'",
+        hint=(
+            "Close the managed NotebookLM browser for this profile and run "
+            "'nlm login --clear' again."
+        ),
+    )
+
+
 def extract_cookies_via_cdp(
     port: int = CDP_DEFAULT_PORT,
     auto_launch: bool = True,
@@ -1782,12 +1821,13 @@ def extract_cookies_via_cdp(
     """
     if clear_profile:
         chrome_path = get_chrome_path()
-        profile_dir = (
-            _get_profile_dir_for_launch(chrome_path, profile_name)
-            if chrome_path
-            else get_chrome_profile_dir(profile_name)
-        )
-        _clear_profile_directory(profile_name, profile_dir)
+        if chrome_path:
+            profile_dir = _get_profile_dir_for_launch(chrome_path, profile_name)
+        else:
+            from notebooklm_tools.utils.config import get_chrome_profile_dir
+
+            profile_dir = get_chrome_profile_dir(profile_name)
+        _clear_managed_profile_directory(profile_name, profile_dir)
 
     # Check if Chrome is running with debugging
     # First, try to find an existing instance on any port in our range

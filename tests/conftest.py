@@ -114,12 +114,7 @@ def _evaluate_tripwire(
 
 
 _tripwire_key = pytest.StashKey[
-    tuple[
-        Path,
-        Path,
-        dict[str, StorageFingerprint],
-        dict[str, StorageFingerprint],
-    ]
+    tuple[Path, Path, dict[str, StorageFingerprint], dict[str, StorageFingerprint]]
 ]()
 
 
