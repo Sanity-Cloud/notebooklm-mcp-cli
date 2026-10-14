@@ -185,7 +185,7 @@ def test_mcp_refresh_auth_uses_broker_reserved_headless_port(monkeypatch):
     monkeypatch.setenv("NOTEBOOKLM_AUTH_BROKER_PROFILES", "pte,harmonywave13")
     monkeypatch.setenv("NOTEBOOKLM_AUTH_BROKER_HEADLESS_CDP_PORT", "9224")
     monkeypatch.setenv("NOTEBOOKLM_AUTH_BROKER_CDP_PORT_STRIDE", "2")
-    monkeypatch.setattr("notebooklm_tools.services.auth.load_cached_tokens", lambda: None)
+    monkeypatch.setattr("notebooklm_tools.services.auth.load_cached_tokens", lambda **_kwargs: None)
     monkeypatch.setattr(
         "notebooklm_tools.utils.config.get_config",
         lambda: SimpleNamespace(auth=SimpleNamespace(default_profile="harmonywave13")),
@@ -199,3 +199,7 @@ def test_mcp_refresh_auth_uses_broker_reserved_headless_port(monkeypatch):
 
     assert auth_tools.refresh_auth()["status"] == "success"
     assert calls == [{"profile_name": "harmonywave13", "port": 9226, "raise_on_error": True}]
+
+    # An explicit non-default profile must use its own reserved CDP port.
+    assert auth_tools.refresh_auth(profile="pte")["status"] == "success"
+    assert calls[-1] == {"profile_name": "pte", "port": 9224, "raise_on_error": True}

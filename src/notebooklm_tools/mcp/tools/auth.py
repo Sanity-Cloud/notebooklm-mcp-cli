@@ -51,15 +51,23 @@ def _broker_headless_cdp_port(profile_name: str) -> int | None:
 
 
 @logged_tool()
-def refresh_auth() -> ResultDict:
-    """Reload auth tokens from disk and recover according to the active auth policy.
+def refresh_auth(profile: str | None = None) -> ResultDict:
+    """Reload auth for a requested profile without switching the active account.
 
-    Call this after running `nlm login` to pick up new tokens. When the external
-    SanityCloud auth broker is enabled, use its per-profile reserved headless CDP
-    port so automatic recovery remains isolated; visible login is the fallback.
+    Reload validated cached tokens or attempt saved-browser recovery. When the
+    SanityCloud auth broker is enabled, use its profile-specific headless CDP
+    port so recovery remains isolated from other profiles.
 
     Returns status indicating if tokens were refreshed successfully.
     """
+
+    def reload_active_client() -> None:
+        from notebooklm_tools.utils.config import get_config
+
+        if profile is None or profile == get_config().auth.default_profile:
+            reset_client()
+            get_client()
+
     try:
         # If NOTEBOOKLM_COOKIES is set in the environment (e.g. claude_desktop_config.json),
         # it overrides all disk-based auth. Disk reload won't help — the env var wins on
@@ -76,7 +84,7 @@ def refresh_auth() -> ResultDict:
         # Try reloading from disk first
         from notebooklm_tools.services.auth import load_cached_tokens
 
-        cached = load_cached_tokens()
+        cached = load_cached_tokens(profile_name=profile) if profile else load_cached_tokens()
         stale_cached: tuple[str, str | None] | None = None
         headless_failure: AuthenticationError | None = None
         if cached:
@@ -85,10 +93,13 @@ def refresh_auth() -> ResultDict:
             # able to mint fresh credentials via the headless recovery path.
             from notebooklm_tools.services.auth import credentials_are_usable
 
-            usable, status, detail = credentials_are_usable(force=True)
+            usable, status, detail = (
+                credentials_are_usable(force=True, profile=profile)
+                if profile
+                else credentials_are_usable(force=True)
+            )
             if usable:
-                reset_client()
-                get_client()
+                reload_active_client()
                 return {
                     "status": "success",
                     "message": "Auth tokens reloaded from disk cache and validated.",
@@ -104,7 +115,7 @@ def refresh_auth() -> ResultDict:
                 from notebooklm_tools.utils.auth_browser import run_headless_auth
                 from notebooklm_tools.utils.config import get_config
 
-                profile_name = get_config().auth.default_profile
+                profile_name = profile or get_config().auth.default_profile
                 headless_port = _broker_headless_cdp_port(profile_name)
                 if headless_port is None:
                     tokens = run_headless_auth(
@@ -118,8 +129,7 @@ def refresh_auth() -> ResultDict:
                         raise_on_error=True,
                     )
                 if tokens:
-                    reset_client()
-                    get_client()
+                    reload_active_client()
                     return {
                         "status": "success",
                         "message": "Auth tokens refreshed via headless Chrome.",
