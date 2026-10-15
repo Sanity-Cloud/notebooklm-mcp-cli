@@ -37,7 +37,7 @@ class TestValidateHeadlessCandidate:
             profile_name="work",
             is_env_auth=True,
         )
-        client.list_notebooks.assert_called_once_with()
+        client.list_notebooks.assert_called_once_with(require_valid_response=True)
 
     def test_invalid_candidate_is_rejected(self):
         tokens = AuthTokens(cookies={"SID": "fresh"}, csrf_token="csrf")
