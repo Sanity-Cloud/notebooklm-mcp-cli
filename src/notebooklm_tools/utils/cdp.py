@@ -303,11 +303,36 @@ def normalize_cdp_http_url(cdp_url: str) -> str:
     return f"http://{raw.rstrip('/')}"
 
 
+def _other_broker_reserved_headless_ports(profile_name: str) -> set[int]:
+    """Protect other broker profiles' assigned CDP ports during fallback."""
+    enabled = os.getenv("NOTEBOOKLM_AUTH_BROKER_ENABLED", "true").strip().lower()
+    if enabled in {"0", "false", "off", "no"}:
+        return set()
+    profiles = [
+        name.strip()
+        for name in os.getenv("NOTEBOOKLM_AUTH_BROKER_PROFILES", "").split(",")
+        if name.strip()
+    ]
+    if not profiles or profile_name not in profiles:
+        return set()
+    try:
+        base = int(os.getenv("NOTEBOOKLM_AUTH_BROKER_HEADLESS_CDP_PORT", "9224"))
+        stride = int(os.getenv("NOTEBOOKLM_AUTH_BROKER_CDP_PORT_STRIDE", "2"))
+    except ValueError:
+        return set()
+    return {
+        base + (index * stride)
+        for index, name in enumerate(profiles)
+        if name != profile_name and 1 <= base + (index * stride) <= 65535
+    }
+
+
 def find_available_port(
     starting_from: int = 9222,
     max_attempts: int = 10,
     *,
     allow_ephemeral_fallback: bool = True,
+    excluded_ports: set[int] | None = None,
 ) -> int:
     """Find an available loopback port for Chrome debugging.
 
@@ -322,6 +347,7 @@ def find_available_port(
         allow_ephemeral_fallback: If True, use an OS-assigned loopback port when
             the requested range is unavailable. Exact-port callers can disable
             this and retain the historical RuntimeError behavior.
+        excluded_ports: Reserved ports that other authentication profiles own.
 
     Returns:
         An available port number.
@@ -331,8 +357,11 @@ def find_available_port(
     """
     import socket
 
+    blocked = excluded_ports or set()
     for offset in range(max_attempts):
         port = starting_from + offset
+        if port in blocked:
+            continue
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.bind(("127.0.0.1", port))
@@ -341,12 +370,15 @@ def find_available_port(
             continue
 
     if allow_ephemeral_fallback:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(("127.0.0.1", 0))
-                return int(s.getsockname()[1])
-        except OSError:
-            pass
+        for _ in range(10):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(("127.0.0.1", 0))
+                    candidate = int(s.getsockname()[1])
+                    if candidate not in blocked:
+                        return candidate
+            except OSError:
+                break
 
     raise RuntimeError(
         f"No available ports in range {starting_from}-{starting_from + max_attempts - 1}. "
@@ -2267,7 +2299,11 @@ def _run_headless_auth_unlocked(
             # first so a foreign process already holding the default port can't
             # make Chrome bind elsewhere (e.g. [::1]) while we probe the wrong
             # listener (issue #330).
-            port = find_available_port(starting_from=port)
+            reserved_ports = _other_broker_reserved_headless_ports(profile_name)
+            if reserved_ports:
+                port = find_available_port(starting_from=port, excluded_ports=reserved_ports)
+            else:
+                port = find_available_port(starting_from=port)
             chrome_process = launch_chrome_process(port, headless=True, profile_name=profile_name)
             if not chrome_process:
                 if raise_on_error:
