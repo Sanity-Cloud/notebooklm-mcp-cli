@@ -2213,7 +2213,9 @@ def _validate_headless_candidate(tokens: "Any", profile_name: str) -> bool:
             # candidate itself has been accepted and saved by run_headless_auth.
             is_env_auth=True,
         ) as client:
-            client.list_notebooks()
+            # A missing/malformed RPC payload must not authenticate a candidate.
+            # An empty but valid notebook list is still acceptable.
+            client.list_notebooks(require_valid_response=True)
         return True
     except Exception:
         return False
