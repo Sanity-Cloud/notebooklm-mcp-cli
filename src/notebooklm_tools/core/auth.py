@@ -312,7 +312,6 @@ def save_tokens_to_cache(
                     m = json.loads(meta_path.read_text(encoding="utf-8"))
                     if isinstance(m, dict) and m.get("email"):
                         root_data["email"] = m["email"]
-            _atomic_write_json(root_cache, root_data)
 
         manager = get_auth_manager(target_profile)
         saved_profile = manager.save_profile(
@@ -324,6 +323,10 @@ def save_tokens_to_cache(
             force=force,
             expected_revision=expected_revision,
         )
+        # Publish the legacy root mirror only after the canonical profile save
+        # succeeds. A rejected or failed profile write must not publish tokens.
+        if disk_mode == "file" and target_profile == default_profile:
+            _atomic_write_json(root_cache, root_data)
 
     if not silent:
         logger.info(f"Auth tokens cached for profile '{target_profile}'")
