@@ -2228,6 +2228,7 @@ def _run_headless_auth_unlocked(
     expected_revision: str | None = None,
     force: bool | None = None,
     raise_on_error: bool = False,
+    expected_file_fingerprint: str | None = None,
 ) -> "Any | None":
     """Run authentication in headless mode (no user interaction).
 
@@ -2411,11 +2412,14 @@ def _run_headless_auth_unlocked(
                 )
             return None
 
-        save_kwargs: dict[str, Any] = {"profile_name": profile_name}
+        save_kwargs: dict[str, Any] = {
+            "profile_name": profile_name,
+            "force": False if force is None else force,
+        }
+        if expected_file_fingerprint is not None:
+            save_kwargs["expected_file_fingerprint"] = expected_file_fingerprint
         if expected_revision is not None:
             save_kwargs["expected_revision"] = expected_revision
-        if force is not None:
-            save_kwargs["force"] = force
         rev = save_tokens_to_cache(tokens, **save_kwargs)
         tokens.revision = rev
 
@@ -2467,6 +2471,7 @@ def run_headless_auth(
     expected_revision: str | None = None,
     force: bool | None = None,
     raise_on_error: bool = False,
+    expected_file_fingerprint: str | None = None,
 ) -> "Any | None":
     """Serialize headless recovery per profile across CLI and MCP processes.
 
@@ -2478,12 +2483,13 @@ def run_headless_auth(
     from filelock import FileLock
     from filelock import Timeout as FileLockTimeout
 
-    from notebooklm_tools.core.auth import load_cached_tokens
+    from notebooklm_tools.core.auth import auth_state_fingerprint, load_cached_tokens
     from notebooklm_tools.utils.config import get_storage_dir, validate_profile_name
 
     validate_profile_name(profile_name, strict=False)
     before = load_cached_tokens(profile_name=profile_name)
     before_revision = expected_revision or getattr(before, "revision", None)
+    before_file_fingerprint = auth_state_fingerprint(before)
     before_extracted = getattr(before, "extracted_at", 0) or 0
     lock_dir = get_storage_dir() / "locks"
     lock_dir.mkdir(parents=True, exist_ok=True)
@@ -2506,9 +2512,10 @@ def run_headless_auth(
                 port=port,
                 timeout=timeout,
                 profile_name=profile_name,
-                expected_revision=expected_revision,
+                expected_revision=before_revision,
                 force=force,
                 raise_on_error=raise_on_error,
+                expected_file_fingerprint=before_file_fingerprint,
             )
     except FileLockTimeout as exc:
         if raise_on_error:
