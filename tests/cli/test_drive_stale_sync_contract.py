@@ -39,7 +39,7 @@ def _setup(monkeypatch, drive_sources: list[dict]) -> list[list[str]]:
     monkeypatch.setattr(
         commands.sources_service,
         "sync_drive_sources",
-        lambda _client, ids: (calls.append(list(ids)) or [{"synced": True} for _ in ids]),
+        lambda _client, ids: calls.append(list(ids)) or [{"synced": True} for _ in ids],
     )
     return calls
 
