@@ -114,10 +114,11 @@ class TestRunHeadlessAuthCapturesBaseHost:
     def test_headless_refresh_saves_to_requested_profile(self):
         tokens, mock_save = self._run_with_current_url("https://notebook.google.com/")
         assert tokens is not None
-        mock_save.assert_called_once_with(
-            tokens,
-            profile_name="default",
-        )
+        mock_save.assert_called_once()
+        assert mock_save.call_args.args == (tokens,)
+        assert mock_save.call_args.kwargs["profile_name"] == "default"
+        assert mock_save.call_args.kwargs["force"] is False
+        assert isinstance(mock_save.call_args.kwargs["expected_file_fingerprint"], str)
 
     def test_named_profile_is_preserved_when_tokens_are_cached(self):
         tokens, mock_save = self._run_with_current_url(
