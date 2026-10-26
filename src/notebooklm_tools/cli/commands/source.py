@@ -390,10 +390,7 @@ def list_stale_sources(
             listing = sources_service.list_drive_sources(client, notebook_id)
 
         drive_sources = listing["drive_sources"]
-        stale_sources = [
-            {**s, "is_stale": True}
-            for s in drive_sources if s.get("stale") is True
-        ]
+        stale_sources = [{**s, "is_stale": True} for s in drive_sources if s.get("stale") is True]
         unknown_sources = [s for s in drive_sources if s.get("stale") is None]
 
         if not stale_sources:
@@ -447,12 +444,11 @@ def sync_sources(
             else:
                 listing = sources_service.list_drive_sources(client, notebook_id)
                 ids_to_sync = [
-                    s["id"] for s in listing["drive_sources"]
+                    s["id"]
+                    for s in listing["drive_sources"]
                     if s.get("stale") is True and s.get("can_sync") is True and s.get("id")
                 ]
-                unknown_count = sum(
-                    s.get("stale") is None for s in listing["drive_sources"]
-                )
+                unknown_count = sum(s.get("stale") is None for s in listing["drive_sources"])
 
         if not ids_to_sync:
             if not source_ids and unknown_count:
