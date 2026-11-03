@@ -104,6 +104,7 @@ def _register_tools() -> None:
         downloads,
         exports,
         labels,
+        native_source_search,
         notebooks,
         notes,
         pipeline,
@@ -121,6 +122,7 @@ def _register_tools() -> None:
     # Register collected built-in tools with mcp first. Optional plugins may then
     # add their own tools/routes without patching core tool modules.
     register_all_tools(mcp)
+    # Privacy-sensitive tools use the unlogged central registry decorator.
     load_plugins(mcp)
 
     # Optionally hide tool groups/tools via environment variables (opt-in).
