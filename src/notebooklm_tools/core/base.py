@@ -1315,13 +1315,20 @@ class BaseClient:
             # Check if redirected to login (cookies expired)
             if "accounts.google.com" in str(response.url):
                 raise ValueError(
-                    "Authentication expired. AI assistants: Run `nlm login` via Bash/terminal tool to re-authenticate automatically. Users: Run `nlm login` in your terminal."
+                    "Authentication expired. Interactive login requires the human-owned authenticated browser session. Run `nlm login` in your terminal; automated workers must request human re-authentication instead of logging in themselves."
                 )
 
             if response.status_code != 200:
                 raise ValueError(f"Failed to fetch NotebookLM page: HTTP {response.status_code}")
 
             html = response.text
+            # Google can serve the signed-out landing page with HTTP 200.
+            # Detect it before token extraction or writing a misleading dump.
+            if "landing-header-signin" in html:
+                raise ValueError(
+                    "Authentication expired: Google session is not signed in. "
+                    "Run `nlm login` to re-authenticate."
+                )
 
             # Extract the CSRF token from SNlM0e; session IDs are not CSRF tokens.
             from .auth import extract_csrf_from_page_source

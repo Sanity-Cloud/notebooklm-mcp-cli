@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.9] - 2026-11-02
+
+### Fixed
+
+- Cross-notebook queries now preserve each notebook’s citations, cited passages when available, and conversation ID, making answers easier to trace back to their sources ([PR #384](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/384)).
+
+### Changed
+
+- Updated the pinned `astral-sh/setup-uv` GitHub Action from 10.3.0 to 10.3.2 across CI and release workflows, including upstream cache warning fixes and updated uv checksums ([PR #383](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/383)).
+- Updated the pinned `pypa/gh-action-pypi-publish` GitHub Action from 1.14.2 to 1.14.3 for upstream certificate security fixes and runtime dependency hash checking ([PR #382](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/382)).
+
+### Credits
+
+Thanks to **@sushmitxo** for the cross-notebook citation fix in [#384](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/384).
+
+## [0.15.8] - 2026-10-25
+
+### Fixed
+
+- Accept negative Google session IDs in the browser-backed CDP transport and the `f.sid` page fallback, preserving the leading minus sign ([#379](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/379)).
+- Detect Google's signed-out landing page even when Google returns HTTP 200, and report expired authentication before attempting CSRF extraction or writing a misleading page-structure debug dump ([#380](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/380)).
+- Reject file-mode writes copied from a stale root `auth.json` mirror when the canonical default profile contains different cookies. Check under the profile lock, including `force=True` writes, while allowing new login credentials to update both stores ([#381](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/381)).
+
+### Changed
+
+- Added authentication regression tests and documented live verification with isolated credential storage. Live checks confirmed repeated notebook listing through HTTP and CDP, authenticated homepage refresh, signed-out error reporting, and preservation of working credentials after a rejected stale-mirror write. Negative session IDs were verified with regression fixtures because the live session supplied a positive ID.
+
+### Credits
+
+Thanks to **@alexchaifu-ship-it** for reporting the negative session ID bug in [#379](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/379), and **@bradmarshall987** for the detailed authentication reports and reproductions in [#380](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/380) and [#381](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/381).
+
+## [0.15.7] - 2026-10-23
+
+### Fixed
+
+- **`nlm setup add claude-desktop` now writes to the right file on migrated Windows Store installs.** Newer Microsoft Store builds of Claude Desktop move their user data from `%LOCALAPPDATA%\Packages\<package>\LocalCache\Roaming\Claude` to `%LOCALAPPDATA%\Claude-Data\<package>`. We only knew the old path, so `setup add` wrote a config the app never read, and `setup list` read the same file back and showed a false ✓. The resolver now follows the app's own rule: it uses the new folder only when `Claude-Data\<package name, lowercased>` exists as a directory and no `.user-data-back.<package>` marker sits in the old folder. An empty `Claude-Data` folder next to a live old folder keeps the old path, so working installs don't change. `setup list` goes through the same resolver, so it reports the file Claude Desktop actually loads ([#378](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/378)).
+
+### Notes
+
+- Unverified: when the new folder exists with neither a `left` nor a `back` marker, Claude Desktop runs an extra check we haven't read. We treat that case as migrated.
+
+### Credits
+
+Thanks to **@diogoflorencio** for the report and the manual workaround in [#378](https://github.com/jacob-bd/gemini-notebook-mcp-cli/issues/378).
+
+## [0.15.6] - 2026-10-17
+
+### Fixed
+
+- **Headless sign-in requires a valid notebook API response.** Missing or malformed response payloads no longer validate candidate credentials. A valid response with zero notebooks remains accepted ([PR #374](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/374)).
+- **Background recovery preserves newer saved credentials.** Chromium and Firefox recovery compare the starting credential revision or file-mode authentication state before saving, rejecting stale writes when another process updates the profile ([PR #375](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/375)).
+- **Failed profile saves leave the legacy credential cache unchanged.** The default account's file-mode root cache is updated only after its profile save succeeds ([PR #376](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/376)).
+- **Collection editing works again.** Asking Google for a combined rename plus membership change returned INVALID_ARGUMENT for every edit, including re-sending an unchanged list. `edit_collection` now sends one operation per call (rename, add, remove) carrying only the added or removed notebook IDs. Membership is read before anything is written, and an unknown collection ID raises instead of reporting success ([PR #377](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/377)).
+
+### Changed
+
+- Documented the collections MCP tools (`collection_list`, `collection_create`, `collection_edit`, `collection_set_emoji`, `collection_delete`) in the MCP guide, the README feature table and the bundled skill.
+
+### Credits
+
+Thanks to **@insane66613** for the authentication fixes in [#374](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/374), [#375](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/375) and [#376](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/376), and **@huyluong868** for the collection editing fix in [#377](https://github.com/jacob-bd/gemini-notebook-mcp-cli/pull/377).
+
 ## [0.15.5] - 2026-10-14
 
 ### Added
