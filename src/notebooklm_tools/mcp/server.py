@@ -103,6 +103,7 @@ def _register_tools() -> None:
         cross_notebook,
         downloads,
         exports,
+        gemini_conversations,
         labels,
         native_source_search,
         notebooks,
