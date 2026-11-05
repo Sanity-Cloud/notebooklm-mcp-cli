@@ -84,6 +84,8 @@ class FakeHTTP:
 def _client(monkeypatch, http=None, *, sources=None):
     http = http or FakeHTTP()
     client = Mock()
+    client._profile_name = "pte"
+    monkeypatch.setenv(svc.ACCOUNT_BINDINGS_ENV, '{"pte":0}')
     client._get_client.return_value = http
     source_list = (
         sources
@@ -201,9 +203,54 @@ def test_reject_invalid_account_index(monkeypatch, bad):
 
 def test_explicit_account_index_no_fallback(monkeypatch):
     client, http = _client(monkeypatch)
+    monkeypatch.setenv(svc.ACCOUNT_BINDINGS_ENV, '{"pte":2}')
     svc.list_gemini_notebook_conversations(client, NB, gemini_account_index=2)
     assert all("/u/2/" in url for url, _ in http.post_calls)
     assert len(http.post_calls) == 2
+
+
+def test_missing_binding_rejected_before_network(monkeypatch):
+    client, http = _client(monkeypatch)
+    monkeypatch.delenv(svc.ACCOUNT_BINDINGS_ENV)
+    with pytest.raises(svc.GeminiContinuityError, match="not configured"):
+        svc.list_gemini_notebook_conversations(client, NB)
+    assert not http.get_calls and not http.post_calls
+
+
+def test_cross_account_index_rejected_before_network(monkeypatch):
+    client, http = _client(monkeypatch)
+    with pytest.raises(svc.GeminiContinuityError, match="does not match"):
+        svc.list_gemini_notebook_conversations(client, NB, gemini_account_index=1)
+    assert not http.get_calls and not http.post_calls
+
+
+@pytest.mark.parametrize(
+    "binding", ['{"pte":true}', '{"pte":"0"}', '{"other":0}', "{}", "broken-json"]
+)
+def test_bad_or_unbound_profile_config_rejected(monkeypatch, binding):
+    client, http = _client(monkeypatch)
+    monkeypatch.setenv(svc.ACCOUNT_BINDINGS_ENV, binding)
+    with pytest.raises(svc.GeminiContinuityError):
+        svc.list_gemini_notebook_conversations(client, NB)
+    assert not http.get_calls and not http.post_calls
+
+
+def test_env_auth_without_named_profile_rejected(monkeypatch):
+    client, http = _client(monkeypatch)
+    client._profile_name = None
+    with pytest.raises(svc.GeminiContinuityError, match="named"):
+        svc.list_gemini_notebook_conversations(client, NB)
+    assert not http.get_calls and not http.post_calls
+
+
+def test_verbose_http_logging_rejected_before_network(monkeypatch, caplog):
+    client, http = _client(monkeypatch)
+    with (
+        caplog.at_level(logging.INFO, logger="httpx"),
+        pytest.raises(svc.GeminiContinuityError, match="verbose HTTP"),
+    ):
+        svc.list_gemini_notebook_conversations(client, NB)
+    assert not http.get_calls and not http.post_calls
 
 
 def test_unavailable_gemini_account_fails_closed(monkeypatch):

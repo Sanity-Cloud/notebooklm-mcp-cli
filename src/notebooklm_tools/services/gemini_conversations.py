@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from contextlib import contextmanager
 from typing import Any
@@ -26,10 +27,62 @@ RPC_NOTEBOOK_METADATA = "HcT8bb"
 MAX_HTTP_RESPONSE_CHARS = 2_000_000
 MAX_CONVERSATIONS = 10
 MAX_TITLE_CHARS = 200
+ACCOUNT_BINDINGS_ENV = "NOTEBOOKLM_GEMINI_ACCOUNT_BINDINGS"
 
 
 class GeminiContinuityError(ServiceError):
     """A safe, user-facing error with no auth/session/response payload details."""
+
+
+def _verify_account_binding(client: Any, account_index: int) -> str:
+    """Require an explicit profile -> Gemini account index binding.
+
+    Notebook source overlap proves shared notebook access, not that a different
+    Google account does not have access to the same shared notebook.
+    """
+    profile = getattr(client, "_profile_name", None)
+    if not isinstance(profile, str) or not profile.strip():
+        raise GeminiContinuityError("Gemini requires a selected named NotebookLM profile")
+    raw = os.environ.get(ACCOUNT_BINDINGS_ENV, "")
+    if not raw:
+        raise GeminiContinuityError("Gemini account binding is not configured")
+    try:
+        mapping = json.loads(raw)
+    except ValueError as exc:
+        raise GeminiContinuityError("Gemini account binding configuration is invalid") from exc
+    if not isinstance(mapping, dict):
+        raise GeminiContinuityError("Gemini account binding configuration is invalid")
+    bound = mapping.get(profile)
+    if type(bound) is not int or not 0 <= bound <= 9:
+        raise GeminiContinuityError(
+            "Selected NotebookLM profile has no valid Gemini account binding"
+        )
+    if bound != account_index:
+        raise GeminiContinuityError(
+            "Gemini account index does not match the selected profile binding"
+        )
+    return profile
+
+
+def _require_http_logging_safe() -> None:
+    """Fail closed when transport diagnostics might log session-bearing URLs.
+
+    Dynamic filters alone cannot protect descendant loggers or other threads
+    when verbose HTTP logging is enabled by the MCP host.
+    """
+    sources = (
+        "httpx",
+        "httpx._client",
+        "httpcore",
+        "httpcore._sync",
+        "httpcore._sync.connection",
+        "httpcore._sync.http11",
+        "httpcore._sync.http2",
+    )
+    if any(logging.getLogger(name).isEnabledFor(logging.INFO) for name in sources):
+        raise GeminiContinuityError(
+            "Gemini requests are unavailable while verbose HTTP diagnostics are enabled"
+        )
 
 
 class _SuppressGeminiHttpLogging(logging.Filter):
@@ -253,6 +306,8 @@ def list_gemini_notebook_conversations(
     if type(gemini_account_index) is not int or not 0 <= gemini_account_index <= 9:
         raise ValidationError("gemini_account_index must be an integer between 0 and 9")
     notebook_id = notebook_id.lower()
+    selected_profile = _verify_account_binding(notebooklm_client, gemini_account_index)
+    _require_http_logging_safe()
     try:
         native = notebooks_service.get_notebook(notebooklm_client, notebook_id)
     except Exception as exc:
@@ -293,6 +348,8 @@ def list_gemini_notebook_conversations(
         "notebook_id": notebook_id,
         "notebook_title": str(native.get("title") or "")[:MAX_TITLE_CHARS],
         "gemini_account_index": gemini_account_index,
+        "selected_notebooklm_profile": selected_profile,
+        "account_binding": "explicit_profile_to_gemini_index",
         "identity_check": "native_source_uuid_overlap",
         "verified_native_source_ids": matched_sources,
         "native_notebook_source_count": len(native_source_ids),

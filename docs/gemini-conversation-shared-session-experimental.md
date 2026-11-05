@@ -24,8 +24,12 @@ gemini_notebook_conversation_list(
 )
 ```
 
-Requires `NOTEBOOKLM_ENABLE_GEMINI_CONVERSATIONS=1` in the MCP process
-environment. The flag is **off by default**. The tool belongs to the
+Requires `NOTEBOOKLM_ENABLE_GEMINI_CONVERSATIONS=1` **and** an explicit
+`NOTEBOOKLM_GEMINI_ACCOUNT_BINDINGS` profile-to-Gemini-index JSON mapping in
+the MCP process environment. For example, `{"pte":0}` *only after separately
+verifying* that profile `pte` corresponds to Gemini `/u/0/` on that device.
+Neither variable is set by deployment; the feature remains **off by default**.
+The tool belongs to the
 `chat` group and honors the existing MCP disabled-tool/group controls.
 The selected NotebookLM profile must already be authenticated. The tool does
 not log in, change Google accounts, persist Gemini session values, import
@@ -34,7 +38,10 @@ transcripts, or mutate anything.
 `gemini_account_index` is an *explicit* Gemini web account route (0..9).
 The tool does **not** scan alternatives or automatically switch identities.
 Index 0 is the route observed in the captured HAR; it is not guaranteed to
-be the user's selected NotebookLM Google account.
+be the user's selected NotebookLM Google account. Requests are rejected unless
+the active named NotebookLM profile and the requested Gemini index exactly
+match the explicitly configured mapping. Environment-only cookie clients
+without a named profile cannot use this feature.
 
 ## Authentication
 
@@ -57,6 +64,8 @@ Gemini bootstrap values. If the session is expired or unavailable, the tool
 returns a sanitized error and relies on the existing **visible** NotebookLM
 login workflow for user-controlled reauthentication.
 
+When HTTP transport diagnostics are enabled at INFO/DEBUG, the operation
+fails closed to prevent disclosure of request URLs containing session IDs.
 This is session reuse, **not a formal OAuth scope or supported consumer API**.
 The source-overlap check confirms the notebook data matches; it cannot prove
 that two browser applications are using the same human identity for a shared
@@ -74,7 +83,10 @@ NotebookLM conversations. Titles may be private metadata.
 
 ## Security and reliability
 
-- One notebook, one explicitly indexed Gemini account, no account probing.
+- One notebook and one Gemini account explicitly bound to the active named
+  NotebookLM profile; no account probing or implicit switching.
+- Reject verbose HTTP logging before making network requests, with additional
+  best-effort URL redaction at request time.
 - No retries on 401/403/3xx; no hidden browser launch.
 - Private titles are not logged by the standard MCP request/response decorator:
   the tool uses the existing `unlogged_tool` central registry.
