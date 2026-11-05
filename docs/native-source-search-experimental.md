@@ -1,7 +1,6 @@
 # Native NotebookLM indexed-source retrieval (`ASU5Oe`)
 
-**Status:** EXPERIMENTAL, implemented and live read-only verified, not deployed.
-**Repository branch:** `feat/native-source-search-20261103`.
+**Status:** EXPERIMENTAL, read-only. The RPC is undocumented and may change.
 **Authentication:** existing NotebookLM session; no Gemini/Opal token reuse.
 
 ## Why this capability exists
@@ -91,21 +90,9 @@ It does not write notebook content, create artifacts, or modify auth state
 deliberately. Any startup/login recovery remains governed by existing NLM
 session policy, not this operation.
 
-## Other experimental branches
-
-`feat/gemini-maziqc-readonly-20261103` at `dbbd3d4` was kept separate.
-The evidence no longer supports treating `MaZiqc` as a complete native source
-list; it may represent notebook-scoped Gemini conversation metadata.
-**Do not merge or deploy that adapter as source-listing functionality.**
-
-The newer Gemini `HcT8bb` and `ko3zcd` responses contained native-source
-titles but not confirmed native-source ID mappings or passage retrieval, and
-do not yet establish standalone authorization or a production dependency.
-
 ## Deployment gate
 
-Only after code review, full regression, identity check, and read-only MCP
-smoke validation should the feature branch be considered for merging and
-deploying through the existing SanityCloud process. Do not add a second auth
-broker, auto-replay captured tokens, or change production services as part of
-source retrieval development.
+Only after code review, full regression tests, account and identity checks,
+and read-only MCP smoke validation should this feature be enabled in a
+production deployment. Do not introduce a second authentication broker or
+replay captured third-party credentials.
