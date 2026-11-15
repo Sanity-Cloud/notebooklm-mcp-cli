@@ -10,10 +10,9 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, ParamSpec, TypeAlias, TypeVar, cast
 
-from notebooklm_tools.core.client import NotebookLMClient
-from notebooklm_tools.core.utils import extract_cookies_from_chrome_export
 from notebooklm_tools.mcp.diagnostics import emit_diagnostic_event
-from notebooklm_tools.services.auth import load_cached_tokens
+from notebooklm_tools.services.auth import extract_cookies_from_chrome_export, load_cached_tokens
+from notebooklm_tools.services.client import NotebookLMClient
 from notebooklm_tools.services.errors import ServiceError
 
 # MCP request/response logger
@@ -188,7 +187,7 @@ def start_mcp_background_probe(
 
     _mcp_probe_event.clear()
 
-    from notebooklm_tools.core.credential_store import CredentialStore, get_backend_factory
+    from notebooklm_tools.services.auth_storage import CredentialStore, get_backend_factory
     from notebooklm_tools.utils.config import get_storage_dir
 
     captured_storage_dir = storage_dir if storage_dir is not None else get_storage_dir()
@@ -197,7 +196,7 @@ def start_mcp_background_probe(
     def _worker(target_dir: Path, factory: Callable[[], Any]) -> None:
         global _mcp_probe_available
         try:
-            from notebooklm_tools.core.notices import is_mcp_notice_shown
+            from notebooklm_tools.services.notices import is_mcp_notice_shown
 
             if is_mcp_notice_shown(storage_dir=target_dir):
                 _mcp_probe_available = False
@@ -241,7 +240,7 @@ def maybe_attach_mcp_notice(result: Any) -> None:
         return
     if not _mcp_probe_event.is_set() or not _mcp_probe_available:
         return
-    from notebooklm_tools.core.notices import (
+    from notebooklm_tools.services.notices import (
         get_protect_answer,
         is_mcp_notice_shown,
         mark_mcp_notice_shown,
@@ -335,7 +334,7 @@ def get_client() -> NotebookLMClient:
             return _client
 
     # Profile-based authentication
-    from notebooklm_tools.core.credential_store import get_envelope_revision
+    from notebooklm_tools.services.auth_storage import get_envelope_revision
     from notebooklm_tools.utils.config import (
         get_auth_storage_mode,
         get_config,

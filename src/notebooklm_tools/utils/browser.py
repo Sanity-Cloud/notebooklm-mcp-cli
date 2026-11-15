@@ -19,10 +19,15 @@ def parse_cookies_from_file(file_path: str | Path) -> dict[str, str]:
 
     The file can contain:
     - Raw cookie header string (Cookie: name=value; name2=value2)
-    - cURL command (copy as cURL from DevTools)
+    - cURL command (copy as cURL from DevTools), including inline cookies
+      passed with -b/--cookie
     - JSON object with cookies
     - Netscape/Mozilla cookie file format (tab-separated, as exported by
       browser extensions like "Get cookies.txt LOCALLY")
+
+    For the JSON list and Netscape formats, a cookie name exported for more
+    than one domain resolves to the exact ``.google.com`` value when present,
+    matching :func:`flatten_cookies`.
 
     Args:
         file_path: Path to the file containing cookies.
@@ -50,10 +55,12 @@ def parse_cookies_from_file(file_path: str | Path) -> dict[str, str]:
             return {str(k): str(v) for k, v in data.items()}
         if isinstance(data, list):
             # List of cookie objects
-            cookies = {}
-            for item in data:
-                if isinstance(item, dict) and "name" in item and "value" in item:
-                    cookies[item["name"]] = item["value"]
+            rows = [
+                item
+                for item in data
+                if isinstance(item, dict) and "name" in item and "value" in item
+            ]
+            cookies = flatten_cookies(rows)
             if cookies:
                 return cookies
     except json.JSONDecodeError:
@@ -66,10 +73,8 @@ def parse_cookies_from_file(file_path: str | Path) -> dict[str, str]:
     if netscape_cookies:
         return netscape_cookies
 
-    # Try to extract from cURL command
-    curl_match = re.search(r"-H\s+['\"]Cookie:\s*([^'\"]+)['\"]", content, re.IGNORECASE)
-    if curl_match:
-        content = curl_match.group(1)
+    # Try to extract from a cURL command (Cookie header or -b/--cookie value)
+    content = _extract_cookie_argument_from_curl(content)
 
     # Try to extract Cookie header value
     if content.lower().startswith("cookie:"):
@@ -79,20 +84,69 @@ def parse_cookies_from_file(file_path: str | Path) -> dict[str, str]:
     cookies: dict[str, str] = {}
     for part in content.split(";"):
         part = part.strip()
-        if "=" in part:
-            name, _, value = part.partition("=")
-            name = name.strip()
-            value = value.strip()
-            if name and value:
-                cookies[name] = value
+        if "=" not in part:
+            continue
+        name, _, value = part.partition("=")
+        name = name.strip()
+        value = value.strip()
+        if not name or not value:
+            continue
+        if not _COOKIE_NAME_RE.match(name):
+            raise AuthenticationError(
+                message="Could not parse cookies from file",
+                hint=(
+                    "Found content that is not a cookie name. Use a Cookie header "
+                    "value, a cURL command, JSON, or a Netscape cookie file."
+                ),
+            )
+        cookies[name] = value
 
     if not cookies:
         raise AuthenticationError(
             message="Could not parse cookies from file",
-            hint="The file should contain a Cookie header value or cURL command.",
+            hint=(
+                "The file should contain a Cookie header value, a cURL command "
+                "(including -b/--cookie), JSON, or a Netscape cookie file."
+            ),
         )
 
     return cookies
+
+
+_CURL_COOKIE_HEADER_RE = re.compile(
+    r"-H\s+\$?['\"]Cookie:\s*(?P<value>[^'\"\r\n]+)['\"]", re.IGNORECASE
+)
+_CURL_COOKIE_FLAG_RE = re.compile(
+    r"(?:^|\s)(?:-b|--cookie)(?:\s+|=)\$?(?P<quote>['\"])(?P<value>.*?)(?P=quote)",
+    re.DOTALL,
+)
+_CURL_COOKIE_FLAG_BARE_RE = re.compile(r"(?:^|\s)(?:-b|--cookie)(?:\s+|=)(?P<value>[^\s'\"]+)")
+_COOKIE_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+
+
+def _extract_cookie_argument_from_curl(content: str) -> str:
+    """Return the cookie string carried by a cURL export, if there is one.
+
+    Chrome's "Copy as cURL" exports carry cookies either in a Cookie header
+    (-H 'Cookie: ...') or in the inline cookie option (-b 'name=value; ...').
+    Inputs that are not cURL commands are returned unchanged.
+    """
+    header = _CURL_COOKIE_HEADER_RE.search(content)
+    if header:
+        return header.group("value")
+    flag = _CURL_COOKIE_FLAG_RE.search(content) or _CURL_COOKIE_FLAG_BARE_RE.search(content)
+    if flag:
+        value = flag.group("value").strip()
+        if "=" not in value.split(";", 1)[0]:
+            raise AuthenticationError(
+                message="Could not parse cookies from cURL input",
+                hint=(
+                    "-b/--cookie points at a cookie file. Paste the Cookie header "
+                    "value instead, or pass the cookie file itself."
+                ),
+            )
+        return value
+    return content
 
 
 def _try_parse_netscape_cookies(content: str) -> dict[str, str] | None:
@@ -103,11 +157,11 @@ def _try_parse_netscape_cookies(content: str) -> dict[str, str] | None:
         domain  flag  path  secure  expires  name  value
 
     Lines starting with '#' are comments, except '#HttpOnly_' which marks
-    an HttpOnly cookie. Returns None if the content doesn't appear to be
-    Netscape format.
+    an HttpOnly cookie. Duplicate names are resolved by
+    :func:`flatten_cookies`, so an exact ``.google.com`` value wins. Returns
+    None if the content doesn't appear to be Netscape format.
     """
-    cookies: dict[str, str] = {}
-    valid_lines = 0
+    rows: list[dict[str, Any]] = []
 
     for line in content.splitlines():
         # Keep trailing tabs so empty value cookies are not truncated by line.strip()
@@ -129,10 +183,9 @@ def _try_parse_netscape_cookies(content: str) -> dict[str, str] | None:
             # Join remaining parts in case the value itself contains tabs
             value = "\t".join(parts[6:]).strip()
             if name:
-                cookies[name] = value
-                valid_lines += 1
+                rows.append({"name": name, "value": value, "domain": parts[0].strip()})
 
-    return cookies if valid_lines > 0 else None
+    return flatten_cookies(rows) if rows else None
 
 
 def flatten_cookies(cookies: dict[str, str] | list[dict[str, Any]]) -> dict[str, str]:
