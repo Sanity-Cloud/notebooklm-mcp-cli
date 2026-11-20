@@ -29,6 +29,20 @@ DRIVE_MIME_TYPES = {
 }
 
 
+def validate_mcp_file_path(file_path: str) -> None:
+    """Fail closed for MCP file uploads unless an allowed root is configured.
+
+    The local CLI retains its existing unrestricted-file behavior. This guard
+    applies specifically to the MCP tool, which may be exposed over a network.
+    """
+    if not os.environ.get("NOTEBOOKLM_ALLOWED_FILE_DIRS", "").strip():
+        raise ValidationError(
+            "MCP file uploads require NOTEBOOKLM_ALLOWED_FILE_DIRS. "
+            "Stage the file in an explicitly permitted directory."
+        )
+    _validate_file_path_allowlist(file_path)
+
+
 def _validate_file_path_allowlist(file_path: str) -> None:
     configured_dirs = os.environ.get("NOTEBOOKLM_ALLOWED_FILE_DIRS", "")
     if not configured_dirs:

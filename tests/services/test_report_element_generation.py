@@ -191,3 +191,20 @@ def test_second_run_of_same_plan_does_not_restart_element():
     assert second["results"][0]["outcome"] == "failed"
     assert second["results"][0]["error_category"] == "not_suggested"
     assert client.start_artifact_generation.call_count == 1
+
+
+def test_finished_element_locks_do_not_accumulate():
+    import gc
+    import weakref
+
+    from notebooklm_tools.services import interactive_reports as ir
+
+    key = "garbage-collectable-report-element"
+    first = ir._element_lock(key)
+    second = ir._element_lock(key)
+    assert first is second
+    lock_ref = weakref.ref(first)
+    del first, second
+    gc.collect()
+    assert lock_ref() is None
+    assert key not in ir._ELEMENT_LOCKS

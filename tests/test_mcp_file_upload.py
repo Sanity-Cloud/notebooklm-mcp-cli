@@ -4,6 +4,14 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def allowed_mcp_test_staging(monkeypatch):
+    """Constrain MCP test uploads to their temporary staging root."""
+    monkeypatch.setenv("NOTEBOOKLM_ALLOWED_FILE_DIRS", tempfile.gettempdir())
+
 
 class TestMCPSourceAddFile:
     """Test file upload via the consolidated source_add MCP tool."""
@@ -85,3 +93,31 @@ class TestMCPSourceAddFile:
         assert result["error"] == f"Could not add file source: File not found: {resolved_path}"
         assert "machine running nlm or the MCP server" in result["hint"]
         assert str(requested_path) in result["hint"]
+
+
+def test_mcp_file_upload_requires_configured_root(monkeypatch, tmp_path):
+    from notebooklm_tools.mcp.tools import sources
+
+    monkeypatch.delenv("NOTEBOOKLM_ALLOWED_FILE_DIRS", raising=False)
+    mock_client = MagicMock()
+    with patch("notebooklm_tools.mcp.tools.sources.get_client", return_value=mock_client):
+        result = sources.source_add("nb", "file", file_path=str(tmp_path / "secret.pdf"))
+
+    assert result["status"] == "error"
+    assert "NOTEBOOKLM_ALLOWED_FILE_DIRS" in result["error"]
+    mock_client.add_file.assert_not_called()
+
+
+def test_mcp_file_upload_rejects_non_staged_path(monkeypatch, tmp_path):
+    from notebooklm_tools.mcp.tools import sources
+
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    monkeypatch.setenv("NOTEBOOKLM_ALLOWED_FILE_DIRS", str(staged))
+    mock_client = MagicMock()
+    with patch("notebooklm_tools.mcp.tools.sources.get_client", return_value=mock_client):
+        result = sources.source_add("nb", "file", file_path=str(tmp_path / "private.pdf"))
+
+    assert result["status"] == "error"
+    assert "outside allowed directories" in result["error"]
+    mock_client.add_file.assert_not_called()

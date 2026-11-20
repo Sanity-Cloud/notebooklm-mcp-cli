@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import threading
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, ParamSpec, TypeAlias, TypeVar, cast
@@ -484,6 +485,16 @@ def unlogged_tool() -> Callable[[Callable[P, R]], Callable[P, R]]:
     return decorator
 
 
+def _safe_result_outcome(result: Any) -> str:
+    """Return a fixed diagnostic category, never a user-provided status string."""
+    if isinstance(result, dict):
+        if result.get("status") == "error" or "error" in result:
+            return "error"
+        if result.get("status") == "in_progress":
+            return "in_progress"
+    return "completed"
+
+
 def logged_tool() -> Callable[[Callable[P, Any]], Callable[P, Any]]:
     """Decorator that adds MCP request/response logging to a tool.
 
@@ -504,19 +515,19 @@ def logged_tool() -> Callable[[Callable[P, Any]], Callable[P, Any]]:
             async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
                 args, kwargs = _resolve_notebook_alias(sig, args, kwargs)
                 tool_name = async_func.__name__
-                if mcp_logger.isEnabledFor(logging.DEBUG):
-                    params = _sanitize_params({k: v for k, v in kwargs.items() if v is not None})
-                    mcp_logger.debug(f"MCP Request: {tool_name}({json.dumps(params, default=str)})")
+                started = time.perf_counter()
+                mcp_logger.debug("MCP Request: %s", tool_name)
 
                 result: Any = await async_func(*args, **kwargs)
                 maybe_attach_mcp_notice(result)
                 maybe_attach_active_profile_note(result, tool_name)
 
-                if mcp_logger.isEnabledFor(logging.DEBUG):
-                    result_str = json.dumps(_redact(result), default=str)
-                    if len(result_str) > 1000:
-                        result_str = result_str[:1000] + "..."
-                    mcp_logger.debug(f"MCP Response: {tool_name} -> {result_str}")
+                mcp_logger.debug(
+                    "MCP Response: %s outcome=%s duration_ms=%.1f",
+                    tool_name,
+                    _safe_result_outcome(result),
+                    (time.perf_counter() - started) * 1000,
+                )
 
                 return result
 
@@ -528,19 +539,19 @@ def logged_tool() -> Callable[[Callable[P, Any]], Callable[P, Any]]:
             def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
                 args, kwargs = _resolve_notebook_alias(sig, args, kwargs)
                 tool_name = sync_func.__name__
-                if mcp_logger.isEnabledFor(logging.DEBUG):
-                    params = _sanitize_params({k: v for k, v in kwargs.items() if v is not None})
-                    mcp_logger.debug(f"MCP Request: {tool_name}({json.dumps(params, default=str)})")
+                started = time.perf_counter()
+                mcp_logger.debug("MCP Request: %s", tool_name)
 
                 result: R = sync_func(*args, **kwargs)
                 maybe_attach_mcp_notice(result)
                 maybe_attach_active_profile_note(result, tool_name)
 
-                if mcp_logger.isEnabledFor(logging.DEBUG):
-                    result_str = json.dumps(_redact(result), default=str)
-                    if len(result_str) > 1000:
-                        result_str = result_str[:1000] + "..."
-                    mcp_logger.debug(f"MCP Response: {tool_name} -> {result_str}")
+                mcp_logger.debug(
+                    "MCP Response: %s outcome=%s duration_ms=%.1f",
+                    tool_name,
+                    _safe_result_outcome(result),
+                    (time.perf_counter() - started) * 1000,
+                )
 
                 return result
 

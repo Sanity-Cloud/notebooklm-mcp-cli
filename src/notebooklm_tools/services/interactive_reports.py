@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import threading
 import time
+import weakref
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -474,7 +475,9 @@ def prepare_element_plan(
 
 
 _LOCKS_GUARD = threading.Lock()
-_ELEMENT_LOCKS: dict[str, threading.Lock] = {}
+# An active operation holds its own strong lock reference. Finished element IDs
+# should not remain in this process indefinitely.
+_ELEMENT_LOCKS: weakref.WeakValueDictionary[str, threading.Lock] = weakref.WeakValueDictionary()
 
 
 def _element_lock(element_id: str) -> threading.Lock:

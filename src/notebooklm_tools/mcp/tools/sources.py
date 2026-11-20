@@ -65,6 +65,8 @@ def source_add(
         client = get_client()
 
         # Coerce list params from MCP clients (may arrive as strings)
+        if source_type == "file" and file_path:
+            sources_service.validate_mcp_file_path(file_path)
         coerced_urls: list[str] | None = coerce_list(urls)
 
         # Bulk URL add: when urls list is provided

@@ -130,6 +130,48 @@ def _invoke_plugin(plugin: PluginCallable, mcp: Any) -> Any:
     return plugin()
 
 
+class _StagedPluginMCP:
+    """Stage ordinary tool/route decorators until plugin setup has succeeded.
+
+    Plugins may inspect the backing MCP instance through delegated attributes.
+    Registration using APIs other than ``tool`` and ``custom_route`` is not
+    transactional; those APIs should be added here before plugin adoption.
+    """
+
+    def __init__(self, mcp: Any) -> None:
+        self._mcp = mcp
+        self._pending: list[tuple[str, tuple[Any, ...], dict[str, Any], Any]] = []
+
+    def _capture(self, method: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        def decorator(func: Any) -> Any:
+            self._pending.append((method, args, kwargs, func))
+            return func
+
+        return decorator
+
+    def tool(self, *args: Any, **kwargs: Any) -> Any:
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            return self._capture("tool", (), {})(args[0])
+        return self._capture("tool", args, kwargs)
+
+    def custom_route(self, *args: Any, **kwargs: Any) -> Any:
+        return self._capture("custom_route", args, kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._mcp, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in {"_mcp", "_pending"}:
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._mcp, name, value)
+
+    def commit(self) -> None:
+        """Publish staged registrations only after plugin initialization returns."""
+        for method, args, kwargs, func in self._pending:
+            getattr(self._mcp, method)(*args, **kwargs)(func)
+
+
 def _configured_plugin_specs() -> list[str]:
     specs = _split_plugin_specs(os.environ.get(PLUGIN_ENV_VAR))
     if specs:
@@ -164,11 +206,19 @@ def load_plugins(
 
     strict_mode = _env_bool(PLUGIN_STRICT_ENV_VAR, default=True) if strict is None else strict
     results: list[PluginLoadResult] = []
+    seen: set[str] = set()
 
     for spec in specs:
+        if spec in seen:
+            logger.warning("Skipped duplicate NotebookLM MCP plugin: %s", spec)
+            results.append({"name": spec, "status": "skipped", "reason": "duplicate"})
+            continue
+        seen.add(spec)
         try:
             plugin = _load_module_plugin(spec)
-            _invoke_plugin(plugin, mcp)
+            staged_mcp = _StagedPluginMCP(mcp)
+            _invoke_plugin(plugin, staged_mcp)
+            staged_mcp.commit()
             results.append({"name": spec, "status": "loaded"})
             logger.info("Loaded NotebookLM MCP plugin: %s", spec)
         except Exception as exc:

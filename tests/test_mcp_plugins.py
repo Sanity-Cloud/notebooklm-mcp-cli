@@ -15,15 +15,17 @@ class FakeMCP:
     def __init__(self) -> None:
         self.tools: list[str] = []
         self.routes: list[tuple[str, tuple[str, ...]]] = []
+        self.tool_options: list[dict] = []
 
-    def tool(self):
+    def tool(self, **kwargs):
         def decorator(func):
             self.tools.append(func.__name__)
+            self.tool_options.append(kwargs)
             return func
 
         return decorator
 
-    def custom_route(self, path: str, methods: list[str]):
+    def custom_route(self, path: str, methods: list[str], **kwargs):
         def decorator(func):
             self.routes.append((path, tuple(methods)))
             return func
@@ -135,3 +137,47 @@ def test_autoload_entry_points(monkeypatch):
 
     assert result == [{"name": "auto-entry", "status": "loaded"}]
     assert mcp.loaded is True
+
+
+def test_plugin_failure_discards_staged_tool(monkeypatch):
+    def register_then_fail(mcp):
+        @mcp.tool()
+        def should_not_appear():
+            return 1
+
+        raise RuntimeError("intentional failure")
+
+    monkeypatch.setattr(plugins, "_load_module_plugin", lambda _: register_then_fail)
+    mcp = FakeMCP()
+    result = plugins.load_plugins(mcp, ["broken_plugin"], strict=False)
+    assert result[0]["status"] == "error"
+    assert mcp.tools == []
+
+
+def test_plugin_failure_discards_staged_route(monkeypatch):
+    def register_then_fail(mcp):
+        @mcp.custom_route("/never-visible", methods=["GET"])
+        async def should_not_appear(request):
+            return None
+
+        raise RuntimeError("intentional failure")
+
+    monkeypatch.setattr(plugins, "_load_module_plugin", lambda _: register_then_fail)
+    mcp = FakeMCP()
+    result = plugins.load_plugins(mcp, ["broken_route"], strict=False)
+    assert result[0]["status"] == "error"
+    assert mcp.routes == []
+
+
+def test_plugin_duplicate_is_loaded_once_and_metadata_survives(monkeypatch):
+    def register(mcp):
+        @mcp.tool(meta={"openai/fileParams": ["file"]})
+        def bridge_upload(file: str):
+            return file
+
+    monkeypatch.setattr(plugins, "_load_module_plugin", lambda _: register)
+    mcp = FakeMCP()
+    result = plugins.load_plugins(mcp, ["bridge", "bridge"])
+    assert [item["status"] for item in result] == ["loaded", "skipped"]
+    assert mcp.tools == ["bridge_upload"]
+    assert mcp.tool_options == [{"meta": {"openai/fileParams": ["file"]}}]
