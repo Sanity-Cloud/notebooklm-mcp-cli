@@ -15,6 +15,8 @@ from collections.abc import Callable, Sequence
 from importlib import metadata
 from typing import Any, cast
 
+from .plugin_safety import PluginRegistrationError, publish_registrations
+
 PLUGIN_ENTRY_POINT_GROUP = "notebooklm_tools.mcp_plugins"
 PLUGIN_ENV_VAR = "NOTEBOOKLM_MCP_PLUGINS"
 PLUGIN_AUTOLOAD_ENV_VAR = "NOTEBOOKLM_MCP_PLUGIN_AUTOLOAD"
@@ -158,6 +160,21 @@ class _StagedPluginMCP:
         return self._capture("custom_route", args, kwargs)
 
     def __getattr__(self, name: str) -> Any:
+        unsupported = {
+            "add_tool",
+            "add_resource",
+            "add_prompt",
+            "add_template",
+            "resource",
+            "prompt",
+            "add_provider",
+            "mount",
+            "_local_provider",
+            "_additional_http_routes",
+            "remove_tool",
+        }
+        if name in unsupported:
+            raise PluginRegistrationError(f"Plugin API {name!r} cannot be staged safely")
         return getattr(self._mcp, name)
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -167,9 +184,8 @@ class _StagedPluginMCP:
             setattr(self._mcp, name, value)
 
     def commit(self) -> None:
-        """Publish staged registrations only after plugin initialization returns."""
-        for method, args, kwargs, func in self._pending:
-            getattr(self._mcp, method)(*args, **kwargs)(func)
+        """Preflight collisions and publish; abort if registration fails."""
+        publish_registrations(self._mcp, self._pending)
 
 
 def _configured_plugin_specs() -> list[str]:
@@ -198,7 +214,8 @@ def load_plugins(
 
     Set ``NOTEBOOKLM_MCP_PLUGIN_AUTOLOAD=true`` to load all installed entry
     points from the group. Explicit plugin failures are fatal by default;
-    set ``NOTEBOOKLM_MCP_PLUGIN_STRICT=false`` to log failures and continue.
+    set ``NOTEBOOKLM_MCP_PLUGIN_STRICT=false`` for recoverable import or setup
+    failures only. Unsafe registration failures are always fatal.
     """
     specs = list(plugin_specs) if plugin_specs is not None else _configured_plugin_specs()
     if not specs:
@@ -221,6 +238,10 @@ def load_plugins(
             staged_mcp.commit()
             results.append({"name": spec, "status": "loaded"})
             logger.info("Loaded NotebookLM MCP plugin: %s", spec)
+        except PluginRegistrationError as exc:
+            raise PluginLoadError(
+                f"Unsafe registration in NotebookLM MCP plugin '{spec}': {exc}"
+            ) from exc
         except Exception as exc:
             message = f"Failed to load NotebookLM MCP plugin '{spec}': {exc}"
             if strict_mode:

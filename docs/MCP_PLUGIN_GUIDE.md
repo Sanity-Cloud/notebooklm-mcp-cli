@@ -46,7 +46,9 @@ NOTEBOOKLM_MCP_PLUGIN_AUTOLOAD=false
 
 `NOTEBOOKLM_MCP_PLUGIN_STRICT=true` is the default. Explicit plugin load
 failures stop server startup so a missing or broken integration is not silently
-ignored. Set it to `false` only when best-effort loading is desired.
+ignored. Set it to `false` only for best-effort import and setup errors that
+have not published any registrations. Tool/route collisions and commit-time
+registration failures remain fatal even when strict mode is disabled.
 
 `NOTEBOOKLM_MCP_PLUGIN_AUTOLOAD=true` loads every installed entry point in the
 `notebooklm_tools.mcp_plugins` group. Explicit `NOTEBOOKLM_MCP_PLUGINS` is
@@ -110,6 +112,14 @@ The plugin seam is intentionally small. Core NotebookLM MCP remains responsible
 for built-in NotebookLM tools and authentication. Plugins should depend on
 public service-layer APIs and should avoid monkey-patching built-in tools.
 
+Supported FastMCP 4.x decorators (`mcp.tool` and `mcp.custom_route`) are staged.
+Registration preflight rejects built-in/extension tool-name collisions,
+duplicate HTTP methods at a path, and reserved transport paths. A failing
+commit restores the supported tool/route registries and aborts startup.
+Other registration APIs such as `mcp.add_tool` are deliberately rejected.
+Plugins are trusted in-process code, not a sandbox: arbitrary side effects
+and direct Python object mutations are not transactional.
+
 ## Plugin ideas
 
 The plugin hook is intentionally generic. Examples of extensions it can support:
@@ -132,9 +142,12 @@ default. Multi-agent runtimes that already coordinate retries externally can
 disable those internal replays:
 
 ```text
-NOTEBOOKLM_RATE_LIMIT_RETRY=false
+NOTEBOOKLM_RATE_LIMIT_MAX_RETRIES=0
 ```
 
-This does not disable connection-establishment retries or authentication
-recovery. It only surfaces rate-limit responses immediately so the external
-queue or coordinator remains the single retry authority.
+This sets the general retry ceiling to zero for rate-limit replays.
+The custom SanityCloud fork also recognizes `NOTEBOOKLM_RATE_LIMIT_RETRY=false`
+as a fail-fast compatibility alias (and it takes precedence over the numeric
+setting). Neither option disables connection establishment or authentication
+recovery. The plugin registration seam alone cannot intercept or enforce rate
+limiting for built-in tools.

@@ -33,10 +33,18 @@ even with DEBUG enabled. The privacy-sensitive `unlogged_tool` remains intact.
 
 Plugin registration through `mcp.tool()` and `mcp.custom_route()` is staged
 until the registration callback finishes. Duplicate plugin specs are skipped.
-Third-party plugins that mutate other MCP internals or perform side effects
-inside their callback remain outside the supported transactional guarantee.
-Commit-time registry failures can still partially register tools; supporting
-more APIs requires a versioned plugin SDK and registry preflight checks.
+The follow-up registration preflight now rejects built-in and plugin tool-name
+collisions, overlapping HTTP method/path combinations, and reserved transport
+paths before mutating the supported FastMCP 4.x registries. Supported tool and
+route registry mutations are restored if a commit raises. Unsafe registration
+errors always abort startup, even with `NOTEBOOKLM_MCP_PLUGIN_STRICT=false`.
+
+This is not a sandbox or a generic atomic plugin API. Plugins are trusted Python
+modules: arbitrary object changes or side effects inside registration callbacks
+cannot be rolled back. Other registration APIs are deliberately rejected by
+the staging facade. Versioned SDK support and adversarial isolation remain
+separate design work. Real FastMCP integration tests cover built-in tool schema
+preservation, route collisions, and rollback on a failed commit.
 
 ## Memory and follow-on work
 
