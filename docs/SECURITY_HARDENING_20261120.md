@@ -15,7 +15,7 @@ An unset or empty configuration denies MCP file uploads, not CLI uploads.
 Example for a managed Windows instance:
 
 ```powershell
-$env:NOTEBOOKLM_ALLOWED_FILE_DIRS = 'X:\MCP\staging;X:\Code\sanity-cloud-ai-portal\tmp\notebooklm-chatgpt-bridge\inbound'
+$env:NOTEBOOKLM_ALLOWED_FILE_DIRS = 'X:\Code\sanity-cloud-ai-portal\tmp\notebooklm-notion-bridge;X:\Code\sanity-cloud-ai-portal\tmp\notebooklm-chatgpt-bridge\inbound'
 ```
 
 The supervisor must set the environment variable *before* starting MCP.
@@ -41,10 +41,16 @@ errors always abort startup, even with `NOTEBOOKLM_MCP_PLUGIN_STRICT=false`.
 
 This is not a sandbox or a generic atomic plugin API. Plugins are trusted Python
 modules: arbitrary object changes or side effects inside registration callbacks
-cannot be rolled back. Other registration APIs are deliberately rejected by
-the staging facade. Versioned SDK support and adversarial isolation remain
-separate design work. Real FastMCP integration tests cover built-in tool schema
-preservation, route collisions, and rollback on a failed commit.
+cannot be rolled back. Other registration APIs, unknown methods and direct facade attribute writes
+are deliberately rejected. Unrecognized FastMCP registry shapes, including
+malformed route tuples, cannot fall through the recoverable strict=false loader
+path. This fix addresses the isolated AiGentAI Copilot review P1 finding.
+Rollback restores captured top-level registry containers, not nested object
+state or arbitrary plugin side effects. Full FastMCP/ASGI atomicity is not
+claimed. Versioned SDK support, file-open replacement races and adversarial
+isolation remain separate design work. Real FastMCP tests cover built-in tool
+schema preservation, route collisions, rollback on a failed commit, malformed
+registry inspection and strict=false fail-closed behavior.
 
 ## Memory and follow-on work
 

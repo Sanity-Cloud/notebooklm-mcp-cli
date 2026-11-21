@@ -47,7 +47,7 @@ NOTEBOOKLM_MCP_PLUGIN_AUTOLOAD=false
 `NOTEBOOKLM_MCP_PLUGIN_STRICT=true` is the default. Explicit plugin load
 failures stop server startup so a missing or broken integration is not silently
 ignored. Set it to `false` only for best-effort import and setup errors that
-have not published any registrations. Tool/route collisions and commit-time
+have not published any registrations. Tool/route collisions, registry-inspection failures, and commit-time
 registration failures remain fatal even when strict mode is disabled.
 
 `NOTEBOOKLM_MCP_PLUGIN_AUTOLOAD=true` loads every installed entry point in the
@@ -74,8 +74,8 @@ NOTEBOOKLM_MCP_PLUGINS=my_package.plugin notebooklm-mcp
 
 ## Custom HTTP routes
 
-Plugins receive the FastMCP instance, so they can register routes when they need
-HTTP callbacks or short-lived download endpoints:
+Plugins receive a restricted staging facade for FastMCP registration, so they
+can register routes when they need HTTP callbacks or short-lived download endpoints:
 
 ```python
 from starlette.responses import JSONResponse
@@ -116,9 +116,15 @@ Supported FastMCP 4.x decorators (`mcp.tool` and `mcp.custom_route`) are staged.
 Registration preflight rejects built-in/extension tool-name collisions,
 duplicate HTTP methods at a path, and reserved transport paths. A failing
 commit restores the supported tool/route registries and aborts startup.
-Other registration APIs such as `mcp.add_tool` are deliberately rejected.
-Plugins are trusted in-process code, not a sandbox: arbitrary side effects
-and direct Python object mutations are not transactional.
+Other registration APIs such as `mcp.add_tool`, unknown facade methods, and
+direct attribute writes are deliberately rejected. This intentionally narrows
+the old attribute-forwarding behavior: extension callbacks should use only
+`tool()` and `custom_route()`; the three SanityCloud bridge plugins do so.
+Unexpected registry inspection failures are fatal even with strict mode off.
+Rollback restores captured top-level containers, but does not deep-copy nested
+objects or guarantee a full FastMCP/ASGI state transaction. Plugins are trusted
+in-process Python, not a sandbox: module globals, direct object references,
+arbitrary side effects and nested mutations are not transactional.
 
 ## Plugin ideas
 

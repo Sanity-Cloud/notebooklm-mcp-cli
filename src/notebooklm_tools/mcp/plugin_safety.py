@@ -43,15 +43,25 @@ def _route_records(mcp: Any) -> list[tuple[str, set[str], str | None]]:
     records = []
     for route in routes:
         if isinstance(route, tuple):
+            if len(route) != 2:
+                raise PluginRegistrationError(
+                    "Unsupported existing HTTP route tuple shape; refusing plugin startup"
+                )
             path, methods = route
             name = None
         else:
             path = getattr(route, "path", None)
             methods = getattr(route, "methods", None)
             name = getattr(route, "name", None)
-        if not isinstance(path, str) or methods is None:
+        if (
+            not isinstance(path, str)
+            or not isinstance(methods, (list, tuple, set, frozenset))
+            or not methods
+            or not all(isinstance(method, str) and method.strip() for method in methods)
+            or (name is not None and not isinstance(name, str))
+        ):
             raise PluginRegistrationError("Unable to inspect existing HTTP route")
-        records.append((path, {str(m).upper() for m in methods}, name))
+        records.append((path, {method.upper() for method in methods}, name))
     return records
 
 
@@ -131,18 +141,30 @@ def publish_registrations(
     registrations: Sequence[tuple[str, tuple[Any, ...], dict[str, Any], Any]],
 ) -> None:
     """Preflight the staged changes, then roll back supported state on failure."""
-    validate_registrations(mcp, registrations)
-    snapshots = _capture_mutable_registries(mcp)
+    snapshots: list[tuple[Any, str, Any]] = []
     try:
+        # Registry discovery and validation must share the same fail-closed
+        # boundary as decorator publication. A FastMCP internal shape change
+        # must never fall through the generic strict=False plugin loader path.
+        snapshots = _capture_mutable_registries(mcp)
+        validate_registrations(mcp, registrations)
         for kind, args, options, func in registrations:
             getattr(mcp, kind)(*args, **options)(func)
     except Exception as exc:
-        for registry, kind, snapshot in reversed(snapshots):
-            registry.clear()
-            if kind == "dict":
-                registry.update(snapshot)
-            else:
-                registry.extend(snapshot)
+        try:
+            for registry, kind, snapshot in reversed(snapshots):
+                registry.clear()
+                if kind == "dict":
+                    registry.update(snapshot)
+                else:
+                    registry.extend(snapshot)
+        except Exception as rollback_error:
+            raise PluginRegistrationError(
+                "Plugin registration failed and registry rollback was incomplete; refusing startup"
+            ) from rollback_error
+        if isinstance(exc, PluginRegistrationError):
+            raise
         raise PluginRegistrationError(
-            "Plugin registration failed; restored tool/route registries and aborted startup"
+            "Plugin registry inspection or publication failed; "
+            "restored captured tool/route registries and aborted startup"
         ) from exc

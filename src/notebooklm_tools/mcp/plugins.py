@@ -160,28 +160,15 @@ class _StagedPluginMCP:
         return self._capture("custom_route", args, kwargs)
 
     def __getattr__(self, name: str) -> Any:
-        unsupported = {
-            "add_tool",
-            "add_resource",
-            "add_prompt",
-            "add_template",
-            "resource",
-            "prompt",
-            "add_provider",
-            "mount",
-            "_local_provider",
-            "_additional_http_routes",
-            "remove_tool",
-        }
-        if name in unsupported:
-            raise PluginRegistrationError(f"Plugin API {name!r} cannot be staged safely")
-        return getattr(self._mcp, name)
+        # Do not forward unknown callable APIs or mutable attributes to the
+        # live server. This is a narrow decorator facade, not a Python sandbox.
+        raise PluginRegistrationError(f"Plugin API {name!r} cannot be staged safely")
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name in {"_mcp", "_pending"}:
             object.__setattr__(self, name, value)
         else:
-            setattr(self._mcp, name, value)
+            raise PluginRegistrationError(f"Plugin attribute {name!r} cannot be staged safely")
 
     def commit(self) -> None:
         """Preflight collisions and publish; abort if registration fails."""

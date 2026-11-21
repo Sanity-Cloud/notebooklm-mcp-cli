@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -122,7 +121,9 @@ def test_entry_point_plugin_loads_by_name(monkeypatch):
 
 def test_autoload_entry_points(monkeypatch):
     def register(mcp):
-        mcp.loaded = True
+        @mcp.tool()
+        def autoloaded_tool():
+            return "loaded"
 
     monkeypatch.setenv(plugins.PLUGIN_AUTOLOAD_ENV_VAR, "true")
     monkeypatch.delenv(plugins.PLUGIN_ENV_VAR, raising=False)
@@ -131,12 +132,12 @@ def test_autoload_entry_points(monkeypatch):
         "_entry_points",
         lambda: [FakeEntryPoint("auto-entry", register)],
     )
-    mcp = SimpleNamespace(loaded=False)
+    mcp = FakeMCP()
 
     result = plugins.load_plugins(mcp)
 
     assert result == [{"name": "auto-entry", "status": "loaded"}]
-    assert mcp.loaded is True
+    assert mcp.tools == ["autoloaded_tool"]
 
 
 def test_plugin_failure_discards_staged_tool(monkeypatch):
