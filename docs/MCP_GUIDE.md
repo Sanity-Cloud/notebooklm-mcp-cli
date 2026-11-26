@@ -51,7 +51,7 @@ A new profile asks whether to store the login **protected** (OS keystore, recomm
 |------|-------------|
 | `notebook_list` | List all notebooks |
 | `notebook_create` | Create new notebook |
-| `notebook_get` | Get notebook details with sources |
+| `notebook_get` | Get notebook details with sources, including original source URLs when available (otherwise null) |
 | `notebook_describe` | Get AI summary and suggested topics |
 | `notebook_rename` | Rename a notebook |
 | `notebook_delete` | Delete notebook (requires `confirm=True`) |
@@ -101,7 +101,7 @@ source_add(
 
 | Tool | Description |
 |------|-------------|
-| `notebook_query` | Ask AI about sources in notebook |
+| `notebook_query` | Ask AI about sources in notebook; citation references include native chunk IDs when present |
 | `notebook_query_start` | Start a query asynchronously for source-heavy notebooks or long-running questions |
 | `notebook_query_status` | Poll an async query started with `notebook_query_start` |
 | `chat_configure` | Set chat goal and response length |
@@ -204,7 +204,7 @@ Omit `steering_prompt` to use the element card's description (same as a plain
 | Tool | Description |
 |------|-------------|
 | `research_start` | Start web/Drive research |
-| `research_status` | Poll research progress |
+| `research_status` | Poll research progress; with `auto_import=True`, reports `import_error` and a reconciliation hint if importing sources is unconfirmed |
 | `research_import` | Import discovered sources (`timeout` and `cited_only` supported) |
 
 ### Notes (1 unified tool)

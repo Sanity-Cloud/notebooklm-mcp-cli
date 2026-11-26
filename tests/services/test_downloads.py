@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from notebooklm_tools.core.errors import ArtifactDownloadError
+from notebooklm_tools.core.errors import ArtifactDownloadError, ClientAuthenticationError
 from notebooklm_tools.services.downloads import (
     VALID_ARTIFACT_TYPES,
     VALID_OUTPUT_FORMATS,
@@ -152,6 +152,16 @@ class TestDownloadSync:
         with pytest.raises(ServiceError, match="Failed to download"):
             download_sync(mock_client, "nb-1", "report", "/tmp/out")
 
+    def test_auth_error_surfaces_login_hint(self, mock_client):
+        mock_client.download_file.side_effect = ClientAuthenticationError(
+            "Download failed: Redirected to login page."
+        )
+        with pytest.raises(ServiceError) as exc_info:
+            download_sync(mock_client, "nb-1", "file", "/tmp/out.bin")
+        assert exc_info.value.debug_code == "auth_required"
+        assert "nlm login" in exc_info.value.user_message
+        assert "nlm login" in (exc_info.value.hint or "")
+
     def test_falsy_path_raises_service_error(self, mock_client):
         mock_client.download_report.return_value = None
         with pytest.raises(ServiceError, match="returned no path"):
@@ -225,6 +235,26 @@ class TestDownloadAsync:
         mock_client.download_audio = AsyncMock(side_effect=RuntimeError("fail"))
         with pytest.raises(ServiceError, match="Failed to download"):
             await download_async(mock_client, "nb-1", "audio", "/tmp/out")
+
+    @pytest.mark.asyncio
+    async def test_auth_error_surfaces_login_hint_without_waiting(self, mock_client):
+        mock_client.download_audio = AsyncMock(
+            side_effect=ClientAuthenticationError("Download failed: Redirected to login page.")
+        )
+        with pytest.raises(ServiceError) as exc_info:
+            await download_async(
+                mock_client,
+                "nb-1",
+                "audio",
+                "/tmp/out.m4a",
+                wait=True,
+                wait_timeout=10.0,
+                poll_interval=0.01,
+            )
+        assert exc_info.value.debug_code == "auth_required"
+        assert "nlm login" in exc_info.value.user_message
+        assert "nlm login" in (exc_info.value.hint or "")
+        mock_client.download_audio.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_audio_propagation_error_has_specific_user_message(self, mock_client):
@@ -434,10 +464,12 @@ def _artifact(**overrides):
 
 
 def _echo_path_sync(notebook_id, output_path, artifact_id=None, *args, **kwargs):
+    Path(output_path).write_text("downloaded", encoding="utf-8")
     return output_path
 
 
 async def _echo_path_async(notebook_id, output_path, artifact_id=None, *args, **kwargs):
+    Path(output_path).write_text("downloaded", encoding="utf-8")
     return output_path
 
 
@@ -719,6 +751,41 @@ class TestDownloadAll:
         assert result["items"][0]["title"] == "Fresh"
         assert result["skipped"][0]["reason"] == "already downloaded"
         assert (nb_dir / "Existing.md").read_text(encoding="utf-8") == "old content"
+
+    @pytest.mark.asyncio
+    async def test_skip_existing_preserves_concurrent_destination(
+        self, bulk_client, monkeypatch, tmp_path
+    ):
+        _patch_lookups(monkeypatch, [_artifact(type="report", title="Report")])
+        destination = tmp_path / "My Notebook" / "Report.md"
+
+        def competing_download(notebook_id, output_path, artifact_id):
+            Path(output_path).write_text("our bytes", encoding="utf-8")
+            destination.write_text("other writer", encoding="utf-8")
+            return output_path
+
+        bulk_client.download_report.side_effect = competing_download
+        result = await download_all(bulk_client, "nb-1", str(tmp_path), skip_existing=True)
+
+        assert result["downloaded"] == 0
+        assert result["failed"] == 0
+        assert result["skipped"][0]["reason"] == "already downloaded"
+        assert destination.read_text(encoding="utf-8") == "other writer"
+        assert list(destination.parent.iterdir()) == [destination]
+
+    @pytest.mark.asyncio
+    async def test_skip_existing_cleans_failed_staging(self, bulk_client, monkeypatch, tmp_path):
+        _patch_lookups(monkeypatch, [_artifact(type="report", title="Report")])
+
+        def failed_download(notebook_id, output_path, artifact_id):
+            Path(output_path).write_text("partial", encoding="utf-8")
+            raise RuntimeError("transfer failed")
+
+        bulk_client.download_report.side_effect = failed_download
+        result = await download_all(bulk_client, "nb-1", str(tmp_path), skip_existing=True)
+        assert result["failed"] == 1
+        assert result["downloaded"] == 0
+        assert not list((tmp_path / "My Notebook").iterdir())
 
     @pytest.mark.asyncio
     async def test_without_skip_existing_overwrites(self, bulk_client, monkeypatch, tmp_path):
